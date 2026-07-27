@@ -193,3 +193,11 @@ the browser's language is Russian, English otherwise.
 
 The register map is derived from `mukaschultze/ha-must-inverter` (MIT). Add
 your preferred license for the rest of this project here.
+
+<img width="1863" height="941" alt="image" src="https://github.com/user-attachments/assets/d99964d3-64cb-4250-8192-1d00b09a067f" />
+<img width="875" height="928" alt="image" src="https://github.com/user-attachments/assets/e8abe12a-0df8-45e2-a3f5-229c7c043dc2" />
+<img width="908" height="940" alt="image" src="https://github.com/user-attachments/assets/e17e8b9d-bbdc-445f-bd07-19fdccda7c5c" />
+<img width="861" height="404" alt="image" src="https://github.com/user-attachments/assets/b3c052f7-c02d-47dd-b0b9-354b80409a3e" />
+
+
+
