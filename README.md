@@ -149,6 +149,14 @@ Writes are performed synchronously against the inverter (default 3s timeout)
 and the confirmed state is republished immediately — no waiting for the next
 poll cycle to see whether a change actually took effect.
 
+## Web UI language
+
+The configuration page is bilingual (English/Russian) with a toggle
+button (`EN`/`RU`) in the header — translations are applied client-side
+from a small dictionary, no separate build per language. The choice is
+remembered in the browser (`localStorage`) and defaults to Russian if
+the browser's language is Russian, English otherwise.
+
 ## Architecture notes
 
 - **Dedicated Modbus task (core 0)**: reading/writing registers happens
