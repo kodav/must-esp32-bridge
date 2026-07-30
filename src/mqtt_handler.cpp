@@ -6,12 +6,43 @@
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <PubSubClient.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include <freertos/queue.h>
+
+// ---------------------------------------------------------------------
+// MQTT работает в ОТДЕЛЬНОЙ FreeRTOS-задаче (ядро 0, вместе с Modbus).
+//
+// Причина: s_mqtt.connect() -- блокирующий вызов на уровне TCP-сокета.
+// Если брокер физически недоступен (отключили электричество/интернет на
+// стороне брокера, обрыв связи и т.п.), попытка подключения может висеть
+// заметное время, и это повторяется каждые 5 секунд, пока связи нет. Раз
+// было проверено на практике: при таком сценарии, если это выполняется
+// в ОСНОВНОМ loop() (там же, где веб-сервер) -- веб-интерфейс становится
+// недоступен на весь период отключения, а не только тормозит. Задача
+// полностью изолирует эту проблему от веб-сервера, как и для Modbus.
+//
+// mqttPublishValue() -- тонкий producer, вызывается из ЛЮБОЙ задачи
+// (главным образом из main loop(), когда приходят результаты опроса
+// Modbus через свою очередь): просто кладёт запрос в FreeRTOS-очередь,
+// саму публикацию (с учётом enum_map/bit_map/is_switch) делает уже
+// MQTT-задача -- PubSubClient не потокобезопасен, трогать его можно
+// только из задачи, которая им владеет.
+// ---------------------------------------------------------------------
+
+struct PublishRequest {
+  char name[40];
+  float value;
+};
 
 static WiFiClient s_plainClient;
 static WiFiClientSecure s_secureClient;
 static PubSubClient s_mqtt;
-static bool s_clientBound = false;
+static QueueHandle_t s_publishQueue = nullptr;
+static TaskHandle_t s_taskHandle = nullptr;
+
 static bool s_discoverySent = false;
+static volatile bool s_connectedFlag = false; // читается из других задач (statusLed) -- не трогаем s_mqtt напрямую снаружи
 static unsigned long s_lastReconnectAttempt = 0;
 
 static String deviceObjectId() {
@@ -105,19 +136,11 @@ static void sendDiscoveryIfNeeded() {
     payload += "\"state_topic\":\"" + stateTopic + "\",";
 
     if (isSwitch) {
-      // switch-сущность: состояние и команды -- простые "1"/"0", без
-      // текстовых ON/OFF, чтобы не городить отдельную схему сравнения --
-      // publish уже отдаёт "1"/"0" (см. mqttPublishValue), a onMqttMessage()
-      // и так парсит payload через toFloat(), там ничего менять не пришлось.
       String commandTopic = stateTopic + "/set";
       payload += "\"command_topic\":\"" + commandTopic + "\",";
       payload += "\"payload_on\":\"1\",\"payload_off\":\"0\",";
       payload += "\"state_on\":\"1\",\"state_off\":\"0\",";
     } else if (isNumber) {
-      // number-сущность: слайдер в HA, живёт вместе с command_topic --
-      // изменение значения в HA публикует новое значение туда, мы на
-      // него подписаны (см. tryConnect()/onMqttMessage()) и реально
-      // пишем в инвертор по Modbus.
       String commandTopic = stateTopic + "/set";
       payload += "\"command_topic\":\"" + commandTopic + "\",";
       payload += "\"min\":" + String(r.min_value, 2) + ",";
@@ -125,9 +148,6 @@ static void sendDiscoveryIfNeeded() {
       payload += "\"step\":" + String(r.step, 3) + ",";
       if (r.unit.length()) payload += "\"unit_of_measurement\":\"" + r.unit + "\",";
     } else if (isSelect) {
-      // select-сущность: выпадающий список в HA. HA присылает в
-      // command_topic ТЕКСТ выбранного варианта (не код) -- обратный
-      // поиск текст->код делается в onMqttMessage() по той же enum_map.
       String commandTopic = stateTopic + "/set";
       payload += "\"command_topic\":\"" + commandTopic + "\",";
       String options = "[";
@@ -138,8 +158,6 @@ static void sendDiscoveryIfNeeded() {
       options += "]";
       payload += "\"options\":" + options + ",";
     } else if (isEnum) {
-      // enum-сенсоры HA (только чтение): без unit_of_measurement/state_class,
-      // зато со списком допустимых состояний в "options"
       String options = "[";
       for (size_t i = 0; i < r.enum_map.size(); i++) {
         if (i) options += ",";
@@ -176,11 +194,9 @@ static void sendDiscoveryIfNeeded() {
   logPrintf("[mqtt] HA discovery sent for %u registers", (unsigned)g_config.registers.size());
 }
 
-void mqttPublishValue(const String &name, float value, const String &unit) {
-  // Просто и напрямую: связи нет -- значение не публикуется, и точка.
-  // Локальная история (для просмотра в вебе) ведётся отдельно, в
-  // history.cpp, независимо от состояния MQTT -- см. main.cpp, там
-  // вызывается и mqttPublishValue(), и historyPush() на каждое чтение.
+// Реальная публикация с учётом enum_map/bit_map/is_switch -- вызывается
+// ТОЛЬКО из MQTT-задачи (владеет s_mqtt), см. drainPublishQueue().
+static void publishOne(const String &name, float value) {
   if (!s_mqtt.connected()) return;
   String topic = g_config.mqtt_topic_prefix + "/" + name;
 
@@ -205,10 +221,29 @@ void mqttPublishValue(const String &name, float value, const String &unit) {
   s_mqtt.publish(topic.c_str(), buf);
 }
 
-// Обработчик входящих MQTT-сообщений -- сейчас нужен только для
-// command_topic слайдеров (number-сущностей). HA публикует новое
-// значение в "<prefix>/<name>/set", мы находим регистр по имени темы,
-// переводим в сырое значение по scale и реально пишем в инвертор.
+void mqttPublishValue(const String &name, float value, const String &unit) {
+  if (!s_publishQueue) return;
+  PublishRequest req;
+  strncpy(req.name, name.c_str(), sizeof(req.name) - 1);
+  req.name[sizeof(req.name) - 1] = 0;
+  req.value = value;
+  // не блокируем вызывающую задачу; если очередь вдруг переполнена
+  // (например, долгий обрыв MQTT) -- значение просто теряется, не
+  // страшно, следующий цикл опроса принесёт свежее
+  xQueueSend(s_publishQueue, &req, 0);
+}
+
+static void drainPublishQueue() {
+  if (!s_mqtt.connected()) return;
+  PublishRequest req;
+  while (xQueueReceive(s_publishQueue, &req, 0) == pdTRUE) {
+    publishOne(String(req.name), req.value);
+  }
+}
+
+// Обработчик входящих MQTT-сообщений -- выполняется внутри MQTT-задачи
+// (вызывается синхронно из s_mqtt.loop()), поэтому блокирующий вызов
+// modbusWriteRegisterSync() здесь безопасен -- не трогает веб-сервер.
 static void onMqttMessage(char *topic, byte *payload, unsigned int length) {
   String topicStr(topic);
   String prefix = g_config.mqtt_topic_prefix + "/";
@@ -231,9 +266,6 @@ static void onMqttMessage(char *topic, byte *payload, unsigned int length) {
   bool isSelect = !r->enum_map.empty();
 
   if (isSelect) {
-    // select: HA присылает ТЕКСТ выбранного варианта, а не число --
-    // ищем обратное соответствие текст->код в той же enum_map, что
-    // используется для чтения (lookupEnumText).
     int code = -1;
     for (auto &kv : r->enum_map) {
       if (kv.second == payloadStr) { code = kv.first; break; }
@@ -255,11 +287,9 @@ static void onMqttMessage(char *topic, byte *payload, unsigned int length) {
   ModbusWriteResult result = modbusWriteRegisterSync(r->address, rawValue);
 
   if (result.success) {
-    // сразу отражаем новое значение в state_topic -- не ждём следующего
-    // цикла опроса, HA увидит подтверждённое значение немедленно
     String stateTopic = g_config.mqtt_topic_prefix + "/" + name;
     if (isSelect) {
-      s_mqtt.publish(stateTopic.c_str(), payloadStr.c_str()); // подтверждённый текст варианта как есть
+      s_mqtt.publish(stateTopic.c_str(), payloadStr.c_str());
     } else if (r->is_switch) {
       s_mqtt.publish(stateTopic.c_str(), String((int)lroundf(loggedValue)).c_str());
     } else {
@@ -278,9 +308,7 @@ static bool tryConnect() {
   if (g_config.mqtt_host.length() == 0) return false;
 
   s_mqtt.setServer(g_config.mqtt_host.c_str(), g_config.mqtt_port);
-  s_mqtt.setBufferSize(2048); // 512 было мало -- discovery-пейлоады с русскими
-                              // enum-списками (кириллица вдвое тяжелее в UTF-8)
-                              // превышали буфер, publish() молча проваливался
+  s_mqtt.setBufferSize(2048);
 
   bool ok;
   if (g_config.mqtt_user.length()) {
@@ -293,7 +321,7 @@ static bool tryConnect() {
 
   if (ok) {
     logPrintln("[mqtt] connected");
-    s_discoverySent = false; // отправим discovery заново после (пере)подключения
+    s_discoverySent = false;
 
     unsigned subscribed = 0;
     for (auto &r : g_config.registers) {
@@ -308,41 +336,67 @@ static bool tryConnect() {
   return ok;
 }
 
-void mqttSetup() {
+static void mqttTaskFn(void *) {
+  logPrintln("[mqtt] задача запущена (ядро 0)");
+
   if (g_config.mqtt_tls) {
-    // ВНИМАНИЕ: setInsecure() -- канал шифруется (пассивный перехват трафика
-    // по пути через интернет не сработает), но сертификат брокера НЕ
-    // проверяется (нет защиты от активной MITM-подмены). Для дачно-городского
-    // сценария через белый IP это ощутимо лучше, чем открытый MQTT, но не
-    // полноценный TLS. Если нужна полная проверка -- добавьте свой CA
-    // сертификат через s_secureClient.setCACert(...) вместо setInsecure().
+    // ВНИМАНИЕ: setInsecure() -- канал шифруется, но сертификат брокера
+    // НЕ проверяется (нет защиты от активной MITM-подмены). Для
+    // дачно-городского сценария через белый IP это ощутимо лучше, чем
+    // открытый MQTT, но не полноценный TLS. Для полной проверки --
+    // s_secureClient.setCACert(...) вместо setInsecure().
     s_secureClient.setInsecure();
-    s_mqtt.setClient(s_secureClient);
+    s_secureClient.setTimeout(8000); // ограничиваем время попытки подключения -- не влияет
+    s_mqtt.setClient(s_secureClient); // на веб (отдельная задача), но экономит время задачи
     logPrintln("[mqtt] используется TLS (без проверки сертификата брокера)");
   } else {
+    s_plainClient.setTimeout(8000);
     s_mqtt.setClient(s_plainClient);
     logPrintln("[mqtt] используется обычное (не шифрованное) соединение");
   }
-  s_clientBound = true;
   s_mqtt.setCallback(onMqttMessage);
-}
 
-void mqttLoop() {
-  if (!s_clientBound) return; // mqttSetup() ещё не вызывался -- не должно происходить в норме
-  if (WiFi.status() != WL_CONNECTED) return;
-  if (g_config.mqtt_host.length() == 0) return;
-
-  if (!s_mqtt.connected()) {
-    unsigned long now = millis();
-    if (now - s_lastReconnectAttempt > 5000) {
-      s_lastReconnectAttempt = now;
-      tryConnect();
+  for (;;) {
+    if (WiFi.status() != WL_CONNECTED || g_config.mqtt_host.length() == 0) {
+      s_connectedFlag = false;
+      vTaskDelay(pdMS_TO_TICKS(1000));
+      continue;
     }
-    return;
-  }
 
-  s_mqtt.loop();
-  sendDiscoveryIfNeeded();
+    if (!s_mqtt.connected()) {
+      s_connectedFlag = false;
+      unsigned long now = millis();
+      if (now - s_lastReconnectAttempt > 5000) {
+        s_lastReconnectAttempt = now;
+        tryConnect(); // блокирующий вызов -- но изолирован в этой задаче, веб не трогает
+      }
+      vTaskDelay(pdMS_TO_TICKS(200));
+      continue;
+    }
+
+    s_connectedFlag = true;
+    s_mqtt.loop();
+    sendDiscoveryIfNeeded();
+    drainPublishQueue();
+
+    vTaskDelay(pdMS_TO_TICKS(50));
+  }
 }
 
-bool mqttIsConnected() { return s_mqtt.connected(); }
+void mqttTaskStart() {
+  s_publishQueue = xQueueCreate(64, sizeof(PublishRequest));
+
+  xTaskCreatePinnedToCore(mqttTaskFn, "mqtt", 6144, nullptr, 1, &s_taskHandle, 0);
+
+  logPrintln("[mqtt] задача создана (ядро 0, изолирована от веб-сервера на ядре 1)");
+}
+
+bool mqttIsConnected() { return s_connectedFlag; }
+
+void mqttTaskPause() {
+  if (s_taskHandle) vTaskSuspend(s_taskHandle);
+}
+
+void mqttTaskResume() {
+  if (s_taskHandle) vTaskResume(s_taskHandle);
+}

@@ -40,19 +40,23 @@ static void handlePostConfig() {
   if (!checkAuth()) return;
   String body = g_webServer.arg("plain"); // WebServer сам кладёт сырое тело POST сюда
 
-  // Задача опроса Modbus (отдельное ядро) читает g_config.registers в фоне --
-  // приостанавливаем её на время замены конфига целиком, чтобы не словить
-  // гонку данных при переприсваивании g_config = c внутри configFromJson().
+  // Задачи Modbus и MQTT (отдельные ядра) читают g_config в фоне --
+  // приостанавливаем обе на время замены конфига целиком, чтобы не
+  // словить гонку данных при переприсваивании g_config = c внутри
+  // configFromJson().
   modbusTaskPause();
+  mqttTaskPause();
 
   String err;
   if (!configFromJson(body, err)) {
     modbusTaskResume(); // конфиг не менялся -- можно продолжать как ни в чём не бывало
+    mqttTaskResume();
     g_webServer.send(400, "text/plain", err);
     return;
   }
   if (!configSave()) {
     modbusTaskResume();
+    mqttTaskResume();
     g_webServer.send(500, "text/plain", "failed to save config to flash");
     return;
   }
@@ -133,6 +137,17 @@ static void handlePostModbusWrite() {
   }
 }
 
+static void handleGetHistoryExportCsv() {
+  if (!checkAuth()) return;
+  g_webServer.sendHeader("Content-Disposition", "attachment; filename=\"must_pv18_history.csv\"");
+  g_webServer.setContentLength(CONTENT_LENGTH_UNKNOWN); // потоковая (chunked) отдача -- размер заранее неизвестен
+  g_webServer.send(200, "text/csv", "");
+  g_webServer.sendContent("timestamp,register,value\n");
+  historyExportCsv([](const String &chunk) {
+    g_webServer.sendContent(chunk);
+  });
+}
+
 static void handleGetHistory() {
   if (!checkAuth()) return;
   if (!g_webServer.hasArg("register")) {
@@ -155,6 +170,7 @@ void webServerSetup() {
   g_webServer.on("/api/config", HTTP_POST, handlePostConfig);
   g_webServer.on("/api/logs", HTTP_GET, handleGetLogs);
   g_webServer.on("/api/history", HTTP_GET, handleGetHistory);
+  g_webServer.on("/api/history/export.csv", HTTP_GET, handleGetHistoryExportCsv);
   g_webServer.on("/api/version", HTTP_GET, handleGetVersion);
   g_webServer.on("/api/modbus/write", HTTP_POST, handlePostModbusWrite);
 

@@ -117,3 +117,36 @@ String historyGetJson(const String &registerName, size_t maxPoints) {
   out += "]}";
   return out;
 }
+
+void historyExportCsv(const std::function<void(const String &)> &onChunk) {
+  if (!s_buffer) return;
+
+  size_t validCount = (s_totalWrites < s_capacity) ? s_totalWrites : s_capacity;
+  size_t oldestIdx = (s_totalWrites < s_capacity) ? 0 : s_writeIdx;
+
+  String chunk;
+  chunk.reserve(4200);
+  const size_t CHUNK_FLUSH_SIZE = 4096;
+
+  for (size_t i = 0; i < validCount; i++) {
+    size_t idx = (oldestIdx + i) % s_capacity;
+    const HistoryEntry &e = s_buffer[idx];
+    if (e.regIndex >= g_config.registers.size()) continue; // конфиг мог поменяться после записи -- пропускаем осиротевшие
+
+    chunk += String(e.timestamp);
+    chunk += ",";
+    chunk += g_config.registers[e.regIndex].name;
+    chunk += ",";
+    chunk += String(e.value, 3);
+    chunk += "\n";
+
+    if (chunk.length() >= CHUNK_FLUSH_SIZE) {
+      onChunk(chunk);
+      chunk = "";
+    }
+  }
+
+  if (chunk.length() > 0) {
+    onChunk(chunk);
+  }
+}

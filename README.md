@@ -149,6 +149,19 @@ Writes are performed synchronously against the inverter (default 3s timeout)
 and the confirmed state is republished immediately — no waiting for the next
 poll cycle to see whether a change actually took effect.
 
+## CSV export
+
+The full local history buffer (all registers, no downsampling) can be
+downloaded as CSV from `GET /api/history/export.csv`, or the "Download
+all history as CSV" link on the history card in the web UI. Streamed in
+~4KB chunks directly from the PSRAM ring buffer rather than built as one
+big string in memory — at the maximum history depth (72h) this buffer
+can hold well over a million entries. Long/tidy format
+(`timestamp,register,value`, one row per reading) rather than a wide
+one, since different registers are read at different times and can't be
+honestly aligned 1:1 on a single timestamp column — trivial to pivot in
+Excel/pandas if you need a wide layout for a specific analysis.
+
 ## Web UI language
 
 The configuration page is bilingual (English/Russian) with a toggle
@@ -161,12 +174,24 @@ the browser's language is Russian, English otherwise.
 
 - **Dedicated Modbus task (core 0)**: reading/writing registers happens
   entirely off the main loop. Results and write requests cross task
-  boundaries via small FreeRTOS queues carrying only a register index + value
-  (no strings/pointers), so no mutex is needed around MQTT publishing or the
-  local history buffer — they're only ever touched from the main-loop
-  context. `g_config` itself is protected by briefly suspending the Modbus
-  task around a full config replacement (config changes are rare and always
-  followed by a reboot anyway), rather than a pervasive mutex.
+  boundaries via small FreeRTOS queues carrying only a register index/name +
+  value (no raw pointers), so no mutex is needed around the local history
+  buffer or the MQTT publish queue — they're only ever touched from a single
+  owning context.
+- **Dedicated MQTT task (core 0)**: `PubSubClient::connect()` is a blocking
+  TCP call, and can hang for a noticeable time when the broker is genuinely
+  unreachable (e.g. a power/internet outage at the broker's end). Running
+  this on the same core/task as the web server made the entire web UI
+  unresponsive for the whole outage in practice — moving MQTT to its own
+  task (mirroring the Modbus task) fixes this: the web server (core 1) is
+  now never blocked by MQTT reconnection attempts, however long they take.
+  `mqttPublishValue()` is a thin, cross-task-safe producer that enqueues a
+  `{name, value}` request; the MQTT task itself performs the actual
+  `enum_map`/`bit_map`/`is_switch`-aware publish (PubSubClient is not
+  thread-safe, so it's only ever touched from the task that owns it).
+- `g_config` itself is protected by briefly suspending both the Modbus and
+  MQTT tasks around a full config replacement (config changes are rare and
+  always followed by a reboot anyway), rather than a pervasive mutex.
 - **`log_buffer.cpp`** intercepts all `ESP_LOG` output system-wide (WiFi,
   TLS, etc.) in addition to the firmware's own log calls, and is guarded by a
   recursive FreeRTOS mutex since multiple tasks can log concurrently.

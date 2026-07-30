@@ -209,6 +209,7 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(
       </div>
     </div>
     <button onclick="loadHistory()" data-i18n="btn_load">Load</button>
+    <a class="link" href="/api/history/export.csv" style="margin-left:14px;font-size:14px;" data-i18n="link_csv_export">&#8595; Download all history as CSV</a>
     <canvas id="history_canvas" width="800" height="220" style="width:100%;height:220px;background:#0a0c10;border:1px solid var(--border);border-radius:8px;margin-top:12px;"></canvas>
     <div id="history_table_wrap" style="max-height:260px;overflow-y:auto;margin-top:12px;">
       <table style="width:100%;border-collapse:collapse;font-size:12px;">
@@ -311,6 +312,7 @@ const I18N = {
     label_register: "Register",
     label_points: "Points (max 2000)",
     btn_load: "Load",
+    link_csv_export: "\u2193 Download all history as CSV",
     th_time: "Time",
     th_value: "Value",
     card_logs: "Logs (live)",
@@ -376,6 +378,7 @@ const I18N = {
     label_register: "\u0420\u0435\u0433\u0438\u0441\u0442\u0440",
     label_points: "\u0422\u043e\u0447\u0435\u043a (\u043c\u0430\u043a\u0441. 2000)",
     btn_load: "\u0417\u0430\u0433\u0440\u0443\u0437\u0438\u0442\u044c",
+    link_csv_export: "\u2193 \u0421\u043a\u0430\u0447\u0430\u0442\u044c \u0432\u0441\u044e \u0438\u0441\u0442\u043e\u0440\u0438\u044e \u0432 CSV",
     th_time: "\u0412\u0440\u0435\u043c\u044f",
     th_value: "\u0417\u043d\u0430\u0447\u0435\u043d\u0438\u0435",
     card_logs: "\u041b\u043e\u0433\u0438 (live)",

@@ -74,7 +74,7 @@ void setup() {
 
   webServerSetup();     // включает и логи (SSE), и ElegantOTA, и конфиг-API
   modbusTaskStart();
-  mqttSetup();
+  mqttTaskStart();
   historySetup();
   tempHumiditySetup();
 
@@ -92,6 +92,5 @@ void loop() {
     historyPush(name, value);
   });
 
-  mqttLoop();
   tempHumidityLoop();
 }
