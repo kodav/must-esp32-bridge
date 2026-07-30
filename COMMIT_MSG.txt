@@ -1,0 +1,37 @@
+Move MQTT to a dedicated FreeRTOS task; add CSV history export
+
+MQTT reliability fix
+---------------------
+PubSubClient::connect() is a blocking TCP call and could hang for a
+long time when the broker was genuinely unreachable (e.g. a power or
+internet outage at the broker's end). Running this in the main loop()
+alongside the web server made the entire web UI unresponsive for the
+whole outage -- confirmed in practice, not just theoretical. MQTT now
+runs in its own task pinned to core 0, mirroring the existing Modbus
+task: the web server (core 1) is never blocked by MQTT reconnection
+attempts, no matter how long they take.
+
+- mqttPublishValue() is now a thin, cross-task-safe producer that
+  enqueues {name, value} via a FreeRTOS queue; the MQTT task itself
+  performs the actual enum_map/bit_map/is_switch-aware publish
+  (PubSubClient is not thread-safe, so it's only ever touched by the
+  task that owns it).
+- g_config is protected during a full config replacement by briefly
+  suspending both the Modbus and MQTT tasks (mqttTaskPause/Resume),
+  matching the existing Modbus pattern rather than a pervasive mutex.
+- Bounded the underlying WiFiClient/WiFiClientSecure connect timeout
+  (8s) so a single failed reconnect attempt can't run unbounded.
+
+CSV history export
+-------------------
+Added GET /api/history/export.csv: streams the entire local history
+buffer (all registers, no downsampling) as CSV in ~4KB chunks read
+directly from the PSRAM ring buffer -- deliberately not built as one
+big string in memory, since at max history depth this buffer can hold
+well over a million entries. Long/tidy format
+(timestamp,register,value), one row per reading, since different
+registers are read at different times and can't be honestly aligned
+1:1 into a wide layout. Linked from the web UI history card
+("Download all history as CSV" / "Скачать всю историю в CSV").
+
+Version: 1.11.0 -> 1.13.0

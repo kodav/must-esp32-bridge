@@ -149,6 +149,26 @@ Writes are performed synchronously against the inverter (default 3s timeout)
 and the confirmed state is republished immediately — no waiting for the next
 poll cycle to see whether a change actually took effect.
 
+## Persistent (flash-backed) history
+
+The PSRAM ring buffer above is wiped on every reboot (including OTA
+reflashing) — it's RAM, not storage. An optional second, coarser
+history survives reboots: `flash_history_enabled` (off by default) in
+the web config writes one snapshot of every register's latest value to
+LittleFS every `flash_history_interval_min` minutes (default 5) —
+deliberately *not* writing every individual reading, since flash has a
+limited erase-cycle lifespan and this write frequency would exhaust it.
+At the default 5-minute interval, wear works out to roughly 54 full
+rewrites/year of the ~1.5MB pool used — on the order of ~1800 years to
+reach a typical 100k-cycle flash endurance rating, i.e. a non-issue.
+
+Fixed capacity (150,000 entries, independent of register count, unlike
+the PSRAM buffer) gives roughly a week of 5-minute-resolution history
+at ~79 registers, stored as a circular binary file on the same LittleFS
+partition used for `config.json`. Export via `GET
+/api/history/export_flash.csv` or the corresponding link in the web UI
+— same CSV format as the PSRAM export.
+
 ## CSV export
 
 The full local history buffer (all registers, no downsampling) can be
@@ -218,11 +238,3 @@ the browser's language is Russian, English otherwise.
 
 The register map is derived from `mukaschultze/ha-must-inverter` (MIT). Add
 your preferred license for the rest of this project here.
-
-<img width="1863" height="941" alt="image" src="https://github.com/user-attachments/assets/d99964d3-64cb-4250-8192-1d00b09a067f" />
-<img width="875" height="928" alt="image" src="https://github.com/user-attachments/assets/e8abe12a-0df8-45e2-a3f5-229c7c043dc2" />
-<img width="908" height="940" alt="image" src="https://github.com/user-attachments/assets/e17e8b9d-bbdc-445f-bd07-19fdccda7c5c" />
-<img width="861" height="404" alt="image" src="https://github.com/user-attachments/assets/b3c052f7-c02d-47dd-b0b9-354b80409a3e" />
-
-
-

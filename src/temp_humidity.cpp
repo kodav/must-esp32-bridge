@@ -3,6 +3,7 @@
 #include "log_buffer.h"
 #include "mqtt_handler.h"
 #include "history.h"
+#include "history_flash.h"
 #include <Wire.h>
 #include <Adafruit_SHT4x.h>
 
@@ -60,4 +61,6 @@ void tempHumidityLoop() {
   mqttPublishValue("AmbientHumidity", rh, "%");
   historyPush("AmbientTemperature", tempC);
   historyPush("AmbientHumidity", rh);
+  historyFlashPush("AmbientTemperature", tempC);
+  historyFlashPush("AmbientHumidity", rh);
 }

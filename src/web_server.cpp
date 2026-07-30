@@ -5,6 +5,7 @@
 #include "mqtt_handler.h"
 #include "status_led.h"
 #include "history.h"
+#include "history_flash.h"
 #include "modbus_poll.h"
 #include "version.h"
 #include <ArduinoJson.h>
@@ -62,6 +63,7 @@ static void handlePostConfig() {
   }
   mqttResetDiscovery();
   historyReconfigure();
+  historyFlashReconfigure();
   g_webServer.send(200, "text/plain", "OK");
 
   logPrintln("[web] config updated, rebooting in 1.5s...");
@@ -148,6 +150,17 @@ static void handleGetHistoryExportCsv() {
   });
 }
 
+static void handleGetFlashHistoryExportCsv() {
+  if (!checkAuth()) return;
+  g_webServer.sendHeader("Content-Disposition", "attachment; filename=\"must_pv18_history_flash.csv\"");
+  g_webServer.setContentLength(CONTENT_LENGTH_UNKNOWN);
+  g_webServer.send(200, "text/csv", "");
+  g_webServer.sendContent("timestamp,register,value\n");
+  historyFlashExportCsv([](const String &chunk) {
+    g_webServer.sendContent(chunk);
+  });
+}
+
 static void handleGetHistory() {
   if (!checkAuth()) return;
   if (!g_webServer.hasArg("register")) {
@@ -171,6 +184,7 @@ void webServerSetup() {
   g_webServer.on("/api/logs", HTTP_GET, handleGetLogs);
   g_webServer.on("/api/history", HTTP_GET, handleGetHistory);
   g_webServer.on("/api/history/export.csv", HTTP_GET, handleGetHistoryExportCsv);
+  g_webServer.on("/api/history/export_flash.csv", HTTP_GET, handleGetFlashHistoryExportCsv);
   g_webServer.on("/api/version", HTTP_GET, handleGetVersion);
   g_webServer.on("/api/modbus/write", HTTP_POST, handlePostModbusWrite);
 

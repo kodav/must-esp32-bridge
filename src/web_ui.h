@@ -192,6 +192,21 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(
       entries may show an implausible date (around 1970).</p>
   </div>
 
+  <div class="card">
+    <h2 data-i18n="card_flash_history">Persistent history (flash, survives reboot)</h2>
+    <label><input id="flash_history_enabled" type="checkbox" style="width:auto;display:inline-block;margin-right:6px;"><span data-i18n="label_flash_history_enabled">Enabled</span></label>
+    <label data-i18n="label_flash_history_interval">Checkpoint interval, minutes</label>
+    <input id="flash_history_interval" type="number" value="5">
+    <p class="hint" data-i18n="hint_flash_history">Unlike the RAM history above (every reading, lost on reboot),
+      this writes one snapshot of all registers' latest values every N
+      minutes to flash -- coarser, but survives reboots/reflashing. Off
+      by default -- deliberate: flash has a limited write/erase
+      lifespan, so this trades resolution for endurance rather than
+      writing every single reading. At the default 5-minute interval,
+      wear is negligible over the device's realistic lifetime.</p>
+    <a class="link" href="/api/history/export_flash.csv" data-i18n="link_flash_csv_export">&#8595; Download persistent history as CSV</a>
+  </div>
+
   <button onclick="saveConfig()" data-i18n="btn_save">Save and reboot</button>
   <button class="secondary" onclick="loadConfig()" data-i18n="btn_cancel">Discard changes</button>
   <div id="status"></div>
@@ -306,6 +321,17 @@ const I18N = {
       "poll interval, the exact figure is logged after saving. Time comes " +
       "from NTP -- if WiFi hasn't synced the clock yet, the earliest " +
       "entries may show an implausible date (around 1970).",
+    card_flash_history: "Persistent history (flash, survives reboot)",
+    label_flash_history_enabled: "Enabled",
+    label_flash_history_interval: "Checkpoint interval, minutes",
+    hint_flash_history: "Unlike the RAM history above (every reading, lost on reboot), " +
+      "this writes one snapshot of all registers' latest values every N " +
+      "minutes to flash -- coarser, but survives reboots/reflashing. Off " +
+      "by default -- deliberate: flash has a limited write/erase " +
+      "lifespan, so this trades resolution for endurance rather than " +
+      "writing every single reading. At the default 5-minute interval, " +
+      "wear is negligible over the device's realistic lifetime.",
+    link_flash_csv_export: "\u2193 Download persistent history as CSV",
     btn_save: "Save and reboot",
     btn_cancel: "Discard changes",
     card_history_view: "History: table and graph",
@@ -372,6 +398,18 @@ const I18N = {
     label_history_enabled: "\u0412\u0435\u0441\u0442\u0438 \u0438\u0441\u0442\u043e\u0440\u0438\u044e (\u0434\u043b\u044f \u0442\u0430\u0431\u043b\u0438\u0446\u044b/\u0433\u0440\u0430\u0444\u0438\u043a\u0430 \u043d\u0438\u0436\u0435)",
     label_history_hours: "\u0413\u043b\u0443\u0431\u0438\u043d\u0430 \u0438\u0441\u0442\u043e\u0440\u0438\u0438, \u0447\u0430\u0441\u043e\u0432",
     hint_history: "\u041a\u043e\u043f\u0438\u0442\u0441\u044f \u0432 PSRAM \u043d\u0435\u0437\u0430\u0432\u0438\u0441\u0438\u043c\u043e \u043e\u0442 MQTT/WiFi. \u0412\u0440\u0435\u043c\u044f -- \u043f\u043e NTP.",
+    card_flash_history: "\u041f\u0435\u0440\u0441\u0438\u0441\u0442\u0435\u043d\u0442\u043d\u0430\u044f \u0438\u0441\u0442\u043e\u0440\u0438\u044f (\u0444\u043b\u0435\u0448, \u043f\u0435\u0440\u0435\u0436\u0438\u0432\u0430\u0435\u0442 \u043f\u0435\u0440\u0435\u0437\u0430\u0433\u0440\u0443\u0437\u043a\u0443)",
+    label_flash_history_enabled: "\u0412\u043a\u043b\u044e\u0447\u0435\u043d\u0430",
+    label_flash_history_interval: "\u0418\u043d\u0442\u0435\u0440\u0432\u0430\u043b \u0441\u043d\u0438\u043c\u043a\u043e\u0432, \u043c\u0438\u043d\u0443\u0442",
+    hint_flash_history: "\u0412 \u043e\u0442\u043b\u0438\u0447\u0438\u0435 \u043e\u0442 \u0438\u0441\u0442\u043e\u0440\u0438\u0438 \u0432 PSRAM \u0432\u044b\u0448\u0435 (\u043a\u0430\u0436\u0434\u043e\u0435 \u0447\u0442\u0435\u043d\u0438\u0435, \u0442\u0435\u0440\u044f\u0435\u0442\u0441\u044f \u043f\u0440\u0438 " +
+      "\u043f\u0435\u0440\u0435\u0437\u0430\u0433\u0440\u0443\u0437\u043a\u0435), \u0441\u044e\u0434\u0430 \u0440\u0430\u0437 \u0432 N \u043c\u0438\u043d\u0443\u0442 \u043f\u0438\u0448\u0435\u0442\u0441\u044f \u043e\u0434\u0438\u043d \u0441\u043d\u0438\u043c\u043e\u043a " +
+      "\u043f\u043e\u0441\u043b\u0435\u0434\u043d\u0438\u0445 \u0437\u043d\u0430\u0447\u0435\u043d\u0438\u0439 \u0432\u0441\u0435\u0445 \u0440\u0435\u0433\u0438\u0441\u0442\u0440\u043e\u0432 \u0432\u043e \u0444\u043b\u0435\u0448 -- \u0433\u0440\u0443\u0431\u0435\u0435, " +
+      "\u043d\u043e \u043f\u0435\u0440\u0435\u0436\u0438\u0432\u0430\u0435\u0442 \u043f\u0435\u0440\u0435\u0437\u0430\u0433\u0440\u0443\u0437\u043a\u0443/\u043f\u0435\u0440\u0435\u043f\u0440\u043e\u0448\u0438\u0432\u043a\u0443. \u0412\u044b\u043a\u043b\u044e\u0447\u0435\u043d\u043e " +
+      "\u043f\u043e \u0443\u043c\u043e\u043b\u0447\u0430\u043d\u0438\u044e -- \u0443 \u0444\u043b\u0435\u0448-\u043f\u0430\u043c\u044f\u0442\u0438 \u043e\u0433\u0440\u0430\u043d\u0438\u0447\u0435\u043d\u043d\u044b\u0439 \u0440\u0435\u0441\u0443\u0440\u0441 " +
+      "\u0446\u0438\u043a\u043b\u043e\u0432 \u0441\u0442\u0438\u0440\u0430\u043d\u0438\u044f, \u043f\u043e\u044d\u0442\u043e\u043c\u0443 \u043f\u0438\u0448\u0435\u043c \u0441\u043d\u0438\u043c\u043a\u0430\u043c\u0438, \u0430 \u043d\u0435 \u043a\u0430\u0436\u0434\u043e\u0435 " +
+      "\u043e\u0442\u0434\u0435\u043b\u044c\u043d\u043e\u0435 \u0447\u0442\u0435\u043d\u0438\u0435. \u041f\u0440\u0438 \u0438\u043d\u0442\u0435\u0440\u0432\u0430\u043b\u0435 \u043f\u043e \u0443\u043c\u043e\u043b\u0447\u0430\u043d\u0438\u044e " +
+      "(5 \u043c\u0438\u043d\u0443\u0442) \u0438\u0437\u043d\u043e\u0441 \u043f\u0440\u0435\u043d\u0435\u0431\u0440\u0435\u0436\u0438\u043c \u0437\u0430 \u0432\u0435\u0441\u044c \u0440\u0435\u0430\u043b\u044c\u043d\u044b\u0439 \u0441\u0440\u043e\u043a \u0441\u043b\u0443\u0436\u0431\u044b \u0443\u0441\u0442\u0440\u043e\u0439\u0441\u0442\u0432\u0430.",
+    link_flash_csv_export: "\u2193 \u0421\u043a\u0430\u0447\u0430\u0442\u044c \u043f\u0435\u0440\u0441\u0438\u0441\u0442\u0435\u043d\u0442\u043d\u0443\u044e \u0438\u0441\u0442\u043e\u0440\u0438\u044e \u0432 CSV",
     btn_save: "\u0421\u043e\u0445\u0440\u0430\u043d\u0438\u0442\u044c \u0438 \u043f\u0435\u0440\u0435\u0437\u0430\u0433\u0440\u0443\u0437\u0438\u0442\u044c",
     btn_cancel: "\u041e\u0442\u043c\u0435\u043d\u0438\u0442\u044c \u0438\u0437\u043c\u0435\u043d\u0435\u043d\u0438\u044f",
     card_history_view: "\u0418\u0441\u0442\u043e\u0440\u0438\u044f: \u0442\u0430\u0431\u043b\u0438\u0446\u0430 \u0438 \u0433\u0440\u0430\u0444\u0438\u043a",
@@ -445,6 +483,8 @@ async function loadConfig() {
   sht41_scl_pin.value = (c.sht41 && c.sht41.scl_pin) || 9;
   history_enabled.checked = !!(c.history && c.history.enabled);
   history_hours.value = (c.history && c.history.hours) || 24;
+  flash_history_enabled.checked = !!(c.flash_history && c.flash_history.enabled);
+  flash_history_interval.value = (c.flash_history && c.flash_history.interval_min) || 5;
 
   const sel = document.getElementById('history_register');
   const prevSelected = sel.value;
@@ -488,6 +528,10 @@ async function saveConfig() {
     history: {
       enabled: history_enabled.checked,
       hours: parseFloat(history_hours.value)
+    },
+    flash_history: {
+      enabled: flash_history_enabled.checked,
+      interval_min: parseInt(flash_history_interval.value)
     },
     rgb_led: {
       enabled: rgb_led_enabled.checked,

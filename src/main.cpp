@@ -10,6 +10,7 @@
 #include "mqtt_handler.h"
 #include "status_led.h"
 #include "history.h"
+#include "history_flash.h"
 #include "version.h"
 #include "temp_humidity.h"
 
@@ -76,6 +77,7 @@ void setup() {
   modbusTaskStart();
   mqttTaskStart();
   historySetup();
+  historyFlashSetup();
   tempHumiditySetup();
 
   logPrintln("[boot] инициализация завершена");
@@ -90,7 +92,9 @@ void loop() {
     logPrintf("[data] %s = %.3f %s", name.c_str(), value, unit.c_str());
     mqttPublishValue(name, value, unit);
     historyPush(name, value);
+    historyFlashPush(name, value);
   });
 
+  historyFlashLoop();
   tempHumidityLoop();
 }

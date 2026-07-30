@@ -125,6 +125,8 @@ String configToJson() {
 
   doc["history"]["enabled"] = g_config.history_enabled;
   doc["history"]["hours"] = g_config.history_hours;
+  doc["flash_history"]["enabled"] = g_config.flash_history_enabled;
+  doc["flash_history"]["interval_min"] = g_config.flash_history_interval_min;
 
   doc["ota"]["password"] = g_config.ota_password;
   doc["web"]["username"] = g_config.web_username;
@@ -206,6 +208,8 @@ bool configFromJson(const String &json, String &errorOut) {
 
   c.history_enabled = doc["history"]["enabled"] | true;
   c.history_hours = doc["history"]["hours"] | 24.0f;
+  c.flash_history_enabled = doc["flash_history"]["enabled"] | false;
+  c.flash_history_interval_min = doc["flash_history"]["interval_min"] | 5;
 
   c.ota_password = doc["ota"]["password"] | "";
   c.web_username = (const char*)(doc["web"]["username"] | "admin");
