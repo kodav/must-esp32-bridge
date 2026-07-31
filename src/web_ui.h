@@ -668,9 +668,9 @@ async function loadVersion() {
 }
 loadVersion();
 
+
 applyLang(currentLang);
 loadConfig();
 </script>
 </body>
-</html>
-)HTML";
+</html>)HTML";
