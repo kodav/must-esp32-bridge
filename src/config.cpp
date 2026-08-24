@@ -151,6 +151,12 @@ String configToJson() {
   mb["slave_id"] = g_config.slave_id;
   mb["poll_interval_ms"] = g_config.poll_interval_ms;
 
+  JsonObject am = doc["auto_mode"].to<JsonObject>();
+  am["enabled"] = g_config.auto_mode_enabled;
+  am["pv_high"] = g_config.auto_mode_pv_high;
+  am["pv_low"] = g_config.auto_mode_pv_low;
+  am["min_interval_s"] = g_config.auto_mode_min_interval_s;
+
   JsonArray regs = mb["registers"].to<JsonArray>();
   for (auto &r : g_config.registers) {
     JsonObject o = regs.add<JsonObject>();
@@ -237,6 +243,17 @@ bool configFromJson(const String &json, String &errorOut) {
   c.uart_baud = mb["uart_baud"] | 19200;
   c.slave_id = mb["slave_id"] | 4;
   c.poll_interval_ms = mb["poll_interval_ms"] | 5000;
+
+  c.auto_mode_enabled = doc["auto_mode"]["enabled"] | false;
+  c.auto_mode_pv_high = doc["auto_mode"]["pv_high"] | 50.0f;
+  c.auto_mode_pv_low = doc["auto_mode"]["pv_low"] | 30.0f;
+  c.auto_mode_min_interval_s = doc["auto_mode"]["min_interval_s"] | 300;
+  // Гистерезис: low должен быть строго меньше high, иначе авто-режим бессмысленен
+  if (c.auto_mode_pv_low >= c.auto_mode_pv_high) {
+    c.auto_mode_pv_low = c.auto_mode_pv_high - 5.0f;
+    if (c.auto_mode_pv_low < 0) c.auto_mode_pv_low = 0;
+  }
+  if (c.auto_mode_min_interval_s < 60) c.auto_mode_min_interval_s = 60; // не чаще раза в минуту
 
   JsonArray regs = mb["registers"];
   if (regs.isNull()) {

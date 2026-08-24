@@ -238,6 +238,12 @@ void modbusTaskResume() {
   if (s_taskHandle) vTaskResume(s_taskHandle);
 }
 
+bool modbusWriteRegisterAsync(uint16_t address, uint16_t rawValue) {
+  if (!s_writeQueue) return false;
+  WriteRequest req{address, rawValue, nullptr};
+  return xQueueSend(s_writeQueue, &req, 0) == pdTRUE;
+}
+
 ModbusWriteResult modbusWriteRegisterSync(uint16_t address, uint16_t rawValue, uint32_t timeoutMs) {
   ModbusWriteResult failResult{false, 0xFF}; // 0xFF -- условный код "не удалось даже поставить в очередь/дождаться"
 

@@ -125,6 +125,14 @@ struct AppConfig {
                                         // регистрам (не блокирует loop() -- опрос
                                         // неблокирующий, см. modbus_poll.cpp)
 
+  // ---- Авто-переключение EnergyUseMode (SBU <-> UTI) по PvVoltage ----
+  // Выключено по умолчанию. Гистерезис: выше pv_high → SBU (1), ниже pv_low → UTI (3).
+  // Между порогами режим не трогаем. min_interval_s — защита от частых записей.
+  bool auto_mode_enabled = false;
+  float auto_mode_pv_high = 50.0f;     // V: PvVoltage >= high → SBU
+  float auto_mode_pv_low = 30.0f;      // V: PvVoltage <= low  → UTI (должен быть < high)
+  uint32_t auto_mode_min_interval_s = 300; // минимум секунд между переключениями
+
   std::vector<RegisterDef> registers;
 };
 

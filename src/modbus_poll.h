@@ -41,3 +41,7 @@ struct ModbusWriteResult {
 // rawValue -- уже В СЫРОМ ВИДЕ (после деления желаемого значения на
 // scale регистра, см. web_server.cpp).
 ModbusWriteResult modbusWriteRegisterSync(uint16_t address, uint16_t rawValue, uint32_t timeoutMs = 3000);
+
+// Неблокирующая запись: ставит запрос в очередь и сразу возвращает
+// (результат только в лог). Для авто-логики — не подвешивает main loop / веб.
+bool modbusWriteRegisterAsync(uint16_t address, uint16_t rawValue);

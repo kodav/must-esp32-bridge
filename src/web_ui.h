@@ -78,6 +78,18 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(
     </div>
     <button type="button" onclick="setEnergyMode()" data-i18n="btn_apply_mode">Apply mode</button>
     <span id="ctrl_status" style="margin-left:12px;font-size:13px;color:var(--muted);"></span>
+
+    <hr style="border:none;border-top:1px solid var(--border);margin:16px 0;">
+    <label><input id="auto_mode_enabled" type="checkbox" style="width:auto;display:inline-block;margin-right:6px;">
+      <span data-i18n="label_auto_mode">Auto switch SBU ↔ UTI by PV voltage</span></label>
+    <p class="hint" data-i18n="hint_auto_mode">When enabled: PV ≥ high → SBU, PV ≤ low → UTI. Between thresholds the mode is left unchanged (hysteresis). Min interval limits how often a write is sent to the inverter.</p>
+    <div class="row">
+      <div><label data-i18n="label_auto_pv_high">PV high (V) → SBU</label><input id="auto_mode_pv_high" type="number" step="0.1" value="50"></div>
+      <div><label data-i18n="label_auto_pv_low">PV low (V) → UTI</label><input id="auto_mode_pv_low" type="number" step="0.1" value="30"></div>
+      <div><label data-i18n="label_auto_min_interval">Min interval, s</label><input id="auto_mode_min_interval" type="number" min="60" value="300"></div>
+    </div>
+    <p class="hint" data-i18n="hint_auto_mode_save">These settings are saved with the rest of the config (Save and reboot).</p>
+
     <p class="hint" id="link_status_line" style="margin-top:10px;">
       <span data-i18n="label_link_modbus">Modbus</span>: <b id="st_modbus">—</b>
       &nbsp;·&nbsp;
@@ -381,7 +393,13 @@ const I18N = {
     label_link_mqtt: "MQTT",
     status_mode_ok: "Mode applied",
     status_mode_err: "Write error: ",
-    status_mode_pick: "Select a mode first"
+    status_mode_pick: "Select a mode first",
+    label_auto_mode: "Auto switch SBU ↔ UTI by PV voltage",
+    hint_auto_mode: "When enabled: PV ≥ high → SBU, PV ≤ low → UTI. Between thresholds the mode is left unchanged (hysteresis). Min interval limits how often a write is sent to the inverter.",
+    label_auto_pv_high: "PV high (V) → SBU",
+    label_auto_pv_low: "PV low (V) → UTI",
+    label_auto_min_interval: "Min interval, s",
+    hint_auto_mode_save: "These settings are saved with the rest of the config (Save and reboot)."
   },
   ru: {
     link_ota: "\u041f\u0440\u043e\u0448\u0438\u0432\u043a\u0430 (OTA) \u2192",
@@ -468,7 +486,13 @@ const I18N = {
     label_link_mqtt: "MQTT",
     status_mode_ok: "\u0420\u0435\u0436\u0438\u043c \u043f\u0440\u0438\u043c\u0435\u043d\u0451\u043d",
     status_mode_err: "\u041e\u0448\u0438\u0431\u043a\u0430 \u0437\u0430\u043f\u0438\u0441\u0438: ",
-    status_mode_pick: "\u0421\u043d\u0430\u0447\u0430\u043b\u0430 \u0432\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u0440\u0435\u0436\u0438\u043c"
+    status_mode_pick: "\u0421\u043d\u0430\u0447\u0430\u043b\u0430 \u0432\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u0440\u0435\u0436\u0438\u043c",
+    label_auto_mode: "\u0410\u0432\u0442\u043e-\u043f\u0435\u0440\u0435\u043a\u043b\u044e\u0447\u0435\u043d\u0438\u0435 SBU \u2194 UTI \u043f\u043e \u043d\u0430\u043f\u0440\u044f\u0436\u0435\u043d\u0438\u044e PV",
+    hint_auto_mode: "\u0415\u0441\u043b\u0438 \u0432\u043a\u043b\u044e\u0447\u0435\u043d\u043e: PV \u2265 high \u2192 SBU, PV \u2264 low \u2192 UTI. \u041c\u0435\u0436\u0434\u0443 \u043f\u043e\u0440\u043e\u0433\u0430\u043c\u0438 \u0440\u0435\u0436\u0438\u043c \u043d\u0435 \u043c\u0435\u043d\u044f\u0435\u0442\u0441\u044f (\u0433\u0438\u0441\u0442\u0435\u0440\u0435\u0437\u0438\u0441). \u041c\u0438\u043d. \u0438\u043d\u0442\u0435\u0440\u0432\u0430\u043b \u043e\u0433\u0440\u0430\u043d\u0438\u0447\u0438\u0432\u0430\u0435\u0442 \u0447\u0430\u0441\u0442\u043e\u0442\u0443 \u0437\u0430\u043f\u0438\u0441\u0435\u0439 \u0432 \u0438\u043d\u0432\u0435\u0440\u0442\u043e\u0440.",
+    label_auto_pv_high: "PV high (V) \u2192 SBU",
+    label_auto_pv_low: "PV low (V) \u2192 UTI",
+    label_auto_min_interval: "\u041c\u0438\u043d. \u0438\u043d\u0442\u0435\u0440\u0432\u0430\u043b, \u0441",
+    hint_auto_mode_save: "\u042d\u0442\u0438 \u043d\u0430\u0441\u0442\u0440\u043e\u0439\u043a\u0438 \u0441\u043e\u0445\u0440\u0430\u043d\u044f\u044e\u0442\u0441\u044f \u0432\u043c\u0435\u0441\u0442\u0435 \u0441 \u043e\u0441\u0442\u0430\u043b\u044c\u043d\u044b\u043c \u043a\u043e\u043d\u0444\u0438\u0433\u043e\u043c (\u0421\u043e\u0445\u0440\u0430\u043d\u0438\u0442\u044c \u0438 \u043f\u0435\u0440\u0435\u0437\u0430\u0433\u0440\u0443\u0437\u0438\u0442\u044c)."
   }
 };
 
@@ -526,6 +550,10 @@ async function loadConfig() {
   history_hours.value = (c.history && c.history.hours) || 24;
   flash_history_enabled.checked = !!(c.flash_history && c.flash_history.enabled);
   flash_history_interval.value = (c.flash_history && c.flash_history.interval_min) || 5;
+  auto_mode_enabled.checked = !!(c.auto_mode && c.auto_mode.enabled);
+  auto_mode_pv_high.value = (c.auto_mode && c.auto_mode.pv_high) || 50;
+  auto_mode_pv_low.value = (c.auto_mode && c.auto_mode.pv_low) || 30;
+  auto_mode_min_interval.value = (c.auto_mode && c.auto_mode.min_interval_s) || 300;
 
   const sel = document.getElementById('history_register');
   const prevSelected = sel.value;
@@ -589,6 +617,12 @@ async function saveConfig() {
       uart_de_pin: parseInt(mb_de.value), uart_baud: parseInt(mb_baud.value),
       slave_id: parseInt(mb_slave.value), poll_interval_ms: parseInt(mb_interval.value),
       registers: registers
+    },
+    auto_mode: {
+      enabled: auto_mode_enabled.checked,
+      pv_high: parseFloat(auto_mode_pv_high.value) || 50,
+      pv_low: parseFloat(auto_mode_pv_low.value) || 30,
+      min_interval_s: parseInt(auto_mode_min_interval.value) || 300
     }
   };
 

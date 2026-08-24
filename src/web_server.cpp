@@ -93,6 +93,9 @@ static void handleGetStatus() {
   JsonDocument doc;
   doc["modbus_ok"] = modbusIsHealthy();
   doc["mqtt_ok"] = mqttIsConnected();
+  doc["auto_mode"]["enabled"] = g_config.auto_mode_enabled;
+  doc["auto_mode"]["pv_high"] = g_config.auto_mode_pv_high;
+  doc["auto_mode"]["pv_low"] = g_config.auto_mode_pv_low;
   JsonObject vals = doc["values"].to<JsonObject>();
   for (auto &r : g_config.registers) {
     float v;
