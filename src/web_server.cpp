@@ -213,5 +213,15 @@ void webServerSetup() {
 }
 
 void webServerLoop() {
-  g_webServer.handleClient();
+    // ДОБАВИТЬ: ограничение времени обработки клиентов
+    unsigned long start = millis();
+    while (g_webServer.client().connected() && (millis() - start) < 100) {
+        g_webServer.handleClient();
+        delay(1);
+    }
+    
+    // Если клиентов нет, просто обрабатываем
+    if (!g_webServer.client().connected()) {
+        g_webServer.handleClient();
+    }
 }

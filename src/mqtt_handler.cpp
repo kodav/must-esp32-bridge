@@ -45,6 +45,9 @@ static bool s_discoverySent = false;
 static volatile bool s_connectedFlag = false; // читается из других задач (statusLed) -- не трогаем s_mqtt напрямую снаружи
 static unsigned long s_lastReconnectAttempt = 0;
 
+// В начале файла, после других глобальных переменных добавьте:
+static int s_connectFailCount = 0;
+
 static String deviceObjectId() {
   return "must_pv18_" + String((uint32_t)ESP.getEfuseMac(), HEX);
 }
@@ -146,6 +149,7 @@ static void sendDiscoveryIfNeeded() {
       payload += "\"min\":" + String(r.min_value, 2) + ",";
       payload += "\"max\":" + String(r.max_value, 2) + ",";
       payload += "\"step\":" + String(r.step, 3) + ",";
+      payload += "\"mode\":\"box\",";
       if (r.unit.length()) payload += "\"unit_of_measurement\":\"" + r.unit + "\",";
     } else if (isSelect) {
       String commandTopic = stateTopic + "/set";
@@ -304,83 +308,129 @@ static void onMqttMessage(char *topic, byte *payload, unsigned int length) {
   }
 }
 
+static void forceWiFiReset() {
+    logPrintln("[mqtt] принудительный сброс WiFi стека");
+    WiFi.disconnect(true, true);
+    delay(100);
+    WiFi.reconnect();
+    delay(100);
+}
+
 static bool tryConnect() {
-  if (g_config.mqtt_host.length() == 0) return false;
+    if (g_config.mqtt_host.length() == 0) return false;
 
-  s_mqtt.setServer(g_config.mqtt_host.c_str(), g_config.mqtt_port);
-  s_mqtt.setBufferSize(2048);
+    s_mqtt.setServer(g_config.mqtt_host.c_str(), g_config.mqtt_port);
+    s_mqtt.setBufferSize(2048);
 
-  bool ok;
-  if (g_config.mqtt_user.length()) {
-    ok = s_mqtt.connect(g_config.mqtt_client_id.c_str(),
-                         g_config.mqtt_user.c_str(),
-                         g_config.mqtt_password.c_str());
-  } else {
-    ok = s_mqtt.connect(g_config.mqtt_client_id.c_str());
-  }
-
-  if (ok) {
-    logPrintln("[mqtt] connected");
-    s_discoverySent = false;
-
-    unsigned subscribed = 0;
-    for (auto &r : g_config.registers) {
-      if (!r.writable) continue;
-      String cmdTopic = g_config.mqtt_topic_prefix + "/" + r.name + "/set";
-      if (s_mqtt.subscribe(cmdTopic.c_str())) subscribed++;
+    // ДОБАВИТЬ: ограничение времени подключения
+    unsigned long startAttempt = millis();
+    const unsigned long CONNECT_TIMEOUT = 5000; // 5 секунд
+    
+    bool ok;
+    if (g_config.mqtt_user.length()) {
+        ok = s_mqtt.connect(g_config.mqtt_client_id.c_str(),
+                             g_config.mqtt_user.c_str(),
+                             g_config.mqtt_password.c_str());
+    } else {
+        ok = s_mqtt.connect(g_config.mqtt_client_id.c_str());
     }
-    logPrintf("[mqtt] подписка на команды: %u регистров", subscribed);
-  } else {
-    logPrintf("[mqtt] connect failed, rc=%d", s_mqtt.state());
-  }
-  return ok;
+
+    // Проверка, не зависло ли подключение
+    if (!ok && (millis() - startAttempt) >= CONNECT_TIMEOUT) {
+        logPrintln("[mqtt] timeout при подключении к брокеру");
+        s_mqtt.disconnect(); // принудительно закрыть соединение
+        return false;
+    }
+
+    if (ok) {
+        logPrintln("[mqtt] connected");
+        s_discoverySent = false;
+
+        unsigned subscribed = 0;
+        for (auto &r : g_config.registers) {
+            if (!r.writable) continue;
+            String cmdTopic = g_config.mqtt_topic_prefix + "/" + r.name + "/set";
+            if (s_mqtt.subscribe(cmdTopic.c_str())) subscribed++;
+        }
+        logPrintf("[mqtt] подписка на команды: %u регистров", subscribed);
+    } else {
+        logPrintf("[mqtt] connect failed, rc=%d", s_mqtt.state());
+    }
+
+    if (!ok) {
+        s_connectFailCount++;
+        if (s_connectFailCount > 5) {
+            forceWiFiReset();
+            s_connectFailCount = 0;
+        }
+    } else {
+        s_connectFailCount = 0;
+    }
+    
+    return ok;
 }
 
 static void mqttTaskFn(void *) {
-  logPrintln("[mqtt] задача запущена (ядро 0)");
+    logPrintln("[mqtt] задача запущена (ядро 0)");
 
-  if (g_config.mqtt_tls) {
-    // ВНИМАНИЕ: setInsecure() -- канал шифруется, но сертификат брокера
-    // НЕ проверяется (нет защиты от активной MITM-подмены). Для
-    // дачно-городского сценария через белый IP это ощутимо лучше, чем
-    // открытый MQTT, но не полноценный TLS. Для полной проверки --
-    // s_secureClient.setCACert(...) вместо setInsecure().
-    s_secureClient.setInsecure();
-    s_secureClient.setTimeout(8000); // ограничиваем время попытки подключения -- не влияет
-    s_mqtt.setClient(s_secureClient); // на веб (отдельная задача), но экономит время задачи
-    logPrintln("[mqtt] используется TLS (без проверки сертификата брокера)");
-  } else {
-    s_plainClient.setTimeout(8000);
-    s_mqtt.setClient(s_plainClient);
-    logPrintln("[mqtt] используется обычное (не шифрованное) соединение");
-  }
-  s_mqtt.setCallback(onMqttMessage);
-
-  for (;;) {
-    if (WiFi.status() != WL_CONNECTED || g_config.mqtt_host.length() == 0) {
-      s_connectedFlag = false;
-      vTaskDelay(pdMS_TO_TICKS(1000));
-      continue;
+    if (g_config.mqtt_tls) {
+        s_secureClient.setInsecure();
+        s_secureClient.setTimeout(8000);
+        s_mqtt.setClient(s_secureClient);
+        logPrintln("[mqtt] используется TLS (без проверки сертификата брокера)");
+    } else {
+        s_plainClient.setTimeout(8000);
+        s_mqtt.setClient(s_plainClient);
+        logPrintln("[mqtt] используется обычное (не шифрованное) соединение");
     }
+    s_mqtt.setCallback(onMqttMessage);
 
-    if (!s_mqtt.connected()) {
-      s_connectedFlag = false;
-      unsigned long now = millis();
-      if (now - s_lastReconnectAttempt > 5000) {
-        s_lastReconnectAttempt = now;
-        tryConnect(); // блокирующий вызов -- но изолирован в этой задаче, веб не трогает
-      }
-      vTaskDelay(pdMS_TO_TICKS(200));
-      continue;
+    int connectFailCount = 0;
+    
+    for (;;) {
+        if (WiFi.status() != WL_CONNECTED || g_config.mqtt_host.length() == 0) {
+            s_connectedFlag = false;
+            vTaskDelay(pdMS_TO_TICKS(1000));
+            continue;
+        }
+
+        if (!s_mqtt.connected()) {
+            s_connectedFlag = false;
+            unsigned long now = millis();
+            if (now - s_lastReconnectAttempt > 5000) {
+                s_lastReconnectAttempt = now;
+                
+                // Экспоненциальная задержка при повторных ошибках
+                if (connectFailCount > 10) {
+                    logPrintln("[mqtt] слишком много ошибок, пауза 60с");
+                    vTaskDelay(pdMS_TO_TICKS(60000));
+                    connectFailCount = 0;
+                }
+                
+                if (tryConnect()) {
+                    connectFailCount = 0;
+                } else {
+                    connectFailCount++;
+                }
+            }
+            vTaskDelay(pdMS_TO_TICKS(200));
+            continue;
+        }
+
+        s_connectedFlag = true;
+        connectFailCount = 0;
+        
+        // Ограничение времени выполнения loop()
+        unsigned long loopStart = millis();
+        while (s_mqtt.connected() && (millis() - loopStart) < 100) {
+            s_mqtt.loop();
+            sendDiscoveryIfNeeded();
+            drainPublishQueue();
+            delay(1);
+        }
+        
+        vTaskDelay(pdMS_TO_TICKS(50));
     }
-
-    s_connectedFlag = true;
-    s_mqtt.loop();
-    sendDiscoveryIfNeeded();
-    drainPublishQueue();
-
-    vTaskDelay(pdMS_TO_TICKS(50));
-  }
 }
 
 void mqttTaskStart() {
