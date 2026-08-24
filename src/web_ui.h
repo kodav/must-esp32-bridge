@@ -63,6 +63,29 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(
 <div class="wrap">
 
   <div class="card">
+    <h2 data-i18n="card_control">Inverter control</h2>
+    <p class="hint" data-i18n="hint_control">Works over Modbus only. Web UI stays available even if Modbus or MQTT is down.</p>
+    <div class="row">
+      <div>
+        <label data-i18n="label_energy_mode">Output source priority (SOL / UTI / SBU)</label>
+        <select id="ctrl_energy_mode">
+          <option value="">—</option>
+          <option value="4">SOL — Solar first</option>
+          <option value="3">UTI — Utility only</option>
+          <option value="1">SBU — Solar / Battery / Utility</option>
+        </select>
+      </div>
+    </div>
+    <button type="button" onclick="setEnergyMode()" data-i18n="btn_apply_mode">Apply mode</button>
+    <span id="ctrl_status" style="margin-left:12px;font-size:13px;color:var(--muted);"></span>
+    <p class="hint" id="link_status_line" style="margin-top:10px;">
+      <span data-i18n="label_link_modbus">Modbus</span>: <b id="st_modbus">—</b>
+      &nbsp;·&nbsp;
+      <span data-i18n="label_link_mqtt">MQTT</span>: <b id="st_mqtt">—</b>
+    </p>
+  </div>
+
+  <div class="card">
     <h2 data-i18n="card_wifi">WiFi</h2>
     <div class="row">
       <div><label data-i18n="label_ssid">SSID</label><input id="wifi_ssid" type="text"></div>
@@ -349,7 +372,16 @@ const I18N = {
     status_save_error: "Save error: ",
     text_not_enough_data: "Not enough data for a graph",
     text_time_not_synced: "(time not synced)",
-    text_ntp_warning: "time not synced (NTP)"
+    text_ntp_warning: "time not synced (NTP)",
+    card_control: "Inverter control",
+    hint_control: "Works over Modbus only. Web UI stays available even if Modbus or MQTT is down.",
+    label_energy_mode: "Output source priority (SOL / UTI / SBU)",
+    btn_apply_mode: "Apply mode",
+    label_link_modbus: "Modbus",
+    label_link_mqtt: "MQTT",
+    status_mode_ok: "Mode applied",
+    status_mode_err: "Write error: ",
+    status_mode_pick: "Select a mode first"
   },
   ru: {
     link_ota: "\u041f\u0440\u043e\u0448\u0438\u0432\u043a\u0430 (OTA) \u2192",
@@ -427,7 +459,16 @@ const I18N = {
     status_save_error: "\u041e\u0448\u0438\u0431\u043a\u0430 \u0441\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u0438\u044f: ",
     text_not_enough_data: "\u041d\u0435\u0434\u043e\u0441\u0442\u0430\u0442\u043e\u0447\u043d\u043e \u0434\u0430\u043d\u043d\u044b\u0445 \u0434\u043b\u044f \u0433\u0440\u0430\u0444\u0438\u043a\u0430",
     text_time_not_synced: "(\u0432\u0440\u0435\u043c\u044f \u043d\u0435 \u0441\u0438\u043d\u0445\u0440\u043e\u043d\u0438\u0437\u0438\u0440\u043e\u0432\u0430\u043d\u043e)",
-    text_ntp_warning: "\u0432\u0440\u0435\u043c\u044f \u043d\u0435 \u0441\u0438\u043d\u0445\u0440\u043e\u043d\u0438\u0437\u0438\u0440\u043e\u0432\u0430\u043d\u043e (NTP)"
+    text_ntp_warning: "\u0432\u0440\u0435\u043c\u044f \u043d\u0435 \u0441\u0438\u043d\u0445\u0440\u043e\u043d\u0438\u0437\u0438\u0440\u043e\u0432\u0430\u043d\u043e (NTP)",
+    card_control: "\u0423\u043f\u0440\u0430\u0432\u043b\u0435\u043d\u0438\u0435 \u0438\u043d\u0432\u0435\u0440\u0442\u043e\u0440\u043e\u043c",
+    hint_control: "\u0420\u0430\u0431\u043e\u0442\u0430\u0435\u0442 \u0442\u043e\u043b\u044c\u043a\u043e \u0447\u0435\u0440\u0435\u0437 Modbus. \u0412\u0435\u0431 \u043e\u0441\u0442\u0430\u0451\u0442\u0441\u044f \u0434\u043e\u0441\u0442\u0443\u043f\u0435\u043d, \u0434\u0430\u0436\u0435 \u0435\u0441\u043b\u0438 Modbus \u0438\u043b\u0438 MQTT \u043d\u0435\u0434\u043e\u0441\u0442\u0443\u043f\u043d\u044b.",
+    label_energy_mode: "\u041f\u0440\u0438\u043e\u0440\u0438\u0442\u0435\u0442 \u0438\u0441\u0442\u043e\u0447\u043d\u0438\u043a\u0430 (SOL / UTI / SBU)",
+    btn_apply_mode: "\u041f\u0440\u0438\u043c\u0435\u043d\u0438\u0442\u044c \u0440\u0435\u0436\u0438\u043c",
+    label_link_modbus: "Modbus",
+    label_link_mqtt: "MQTT",
+    status_mode_ok: "\u0420\u0435\u0436\u0438\u043c \u043f\u0440\u0438\u043c\u0435\u043d\u0451\u043d",
+    status_mode_err: "\u041e\u0448\u0438\u0431\u043a\u0430 \u0437\u0430\u043f\u0438\u0441\u0438: ",
+    status_mode_pick: "\u0421\u043d\u0430\u0447\u0430\u043b\u0430 \u0432\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u0440\u0435\u0436\u0438\u043c"
   }
 };
 
@@ -668,6 +709,64 @@ async function loadVersion() {
 }
 loadVersion();
 
+async function pollStatus() {
+  try {
+    const r = await fetch('/api/status');
+    const s = await r.json();
+    const mb = document.getElementById('st_modbus');
+    const mq = document.getElementById('st_mqtt');
+    mb.textContent = s.modbus_ok ? 'OK' : 'fail';
+    mb.style.color = s.modbus_ok ? 'var(--ok)' : 'var(--err)';
+    mq.textContent = s.mqtt_ok ? 'OK' : 'fail';
+    mq.style.color = s.mqtt_ok ? 'var(--ok)' : 'var(--err)';
+    if (s.values && s.values.EnergyUseMode !== undefined) {
+      const sel = document.getElementById('ctrl_energy_mode');
+      const v = String(Math.round(s.values.EnergyUseMode));
+      if (sel.value === '' || sel.dataset.auto !== '0') {
+        sel.value = v;
+        sel.dataset.auto = '1';
+      }
+    }
+  } catch (e) { /* web still up; status optional */ }
+}
+setInterval(pollStatus, 3000);
+pollStatus();
+
+document.getElementById('ctrl_energy_mode').addEventListener('change', function() {
+  this.dataset.auto = '0';
+});
+
+async function setEnergyMode() {
+  const sel = document.getElementById('ctrl_energy_mode');
+  const st = document.getElementById('ctrl_status');
+  const val = sel.value;
+  if (!val) {
+    st.textContent = I18N[currentLang].status_mode_pick;
+    st.style.color = 'var(--err)';
+    return;
+  }
+  st.textContent = '...';
+  st.style.color = 'var(--muted)';
+  try {
+    const r = await fetch('/api/modbus/write', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'EnergyUseMode', value: parseInt(val, 10) })
+    });
+    const t = await r.text();
+    if (r.ok) {
+      st.textContent = I18N[currentLang].status_mode_ok;
+      st.style.color = 'var(--ok)';
+      sel.dataset.auto = '1';
+    } else {
+      st.textContent = I18N[currentLang].status_mode_err + t;
+      st.style.color = 'var(--err)';
+    }
+  } catch (e) {
+    st.textContent = I18N[currentLang].status_mode_err + e;
+    st.style.color = 'var(--err)';
+  }
+}
 
 applyLang(currentLang);
 loadConfig();

@@ -86,6 +86,25 @@ static void handleGetVersion() {
   g_webServer.send(200, "application/json", json);
 }
 
+// Статус моста и последние значения — не зависит от успешности MQTT.
+// Даже если инвертор не отвечает, веб отдаёт этот JSON (modbus_ok=false).
+static void handleGetStatus() {
+  if (!checkAuth()) return;
+  JsonDocument doc;
+  doc["modbus_ok"] = modbusIsHealthy();
+  doc["mqtt_ok"] = mqttIsConnected();
+  JsonObject vals = doc["values"].to<JsonObject>();
+  for (auto &r : g_config.registers) {
+    float v;
+    if (historyGetLast(r.name, v)) {
+      vals[r.name] = v;
+    }
+  }
+  String out;
+  serializeJson(doc, out);
+  g_webServer.send(200, "application/json", out);
+}
+
 static void handlePostModbusWrite() {
   if (!checkAuth()) return;
   String body = g_webServer.arg("plain");
@@ -131,6 +150,7 @@ static void handlePostModbusWrite() {
   ModbusWriteResult result = modbusWriteRegisterSync(target->address, rawValue);
 
   if (result.success) {
+    historyPush(name, value); // сразу обновить кэш для /api/status (не ждать следующего опроса)
     g_webServer.send(200, "text/plain", "OK -- инвертор подтвердил запись");
   } else if (result.errorCode == 0xFF) {
     g_webServer.send(504, "text/plain", "не дождались ответа от инвертора за 3с (проверьте связь по RS485)");
@@ -186,6 +206,7 @@ void webServerSetup() {
   g_webServer.on("/api/history/export.csv", HTTP_GET, handleGetHistoryExportCsv);
   g_webServer.on("/api/history/export_flash.csv", HTTP_GET, handleGetFlashHistoryExportCsv);
   g_webServer.on("/api/version", HTTP_GET, handleGetVersion);
+  g_webServer.on("/api/status", HTTP_GET, handleGetStatus);
   g_webServer.on("/api/modbus/write", HTTP_POST, handlePostModbusWrite);
 
   // logInit() уже вызван в main.cpp::setup() до logInstallEspLogCapture() --
@@ -213,5 +234,7 @@ void webServerSetup() {
 }
 
 void webServerLoop() {
+  // Веб всегда в основном loop() (ядро 1). Modbus и MQTT — отдельные
+  // FreeRTOS-задачи на ядре 0: зависания RS485/MQTT не блокируют HTTP.
   g_webServer.handleClient();
 }

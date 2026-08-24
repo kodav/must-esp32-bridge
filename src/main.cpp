@@ -83,18 +83,26 @@ void setup() {
   logPrintln("[boot] инициализация завершена");
 }
 
-void loop() {
-  webServerLoop();       // синхронный WebServer -- нужно опрашивать вручную
-  ElegantOTA.loop();
-  statusLedLoop();
-
-  modbusPollLoop([](const String &name, float value, const String &unit) {
-    logPrintf("[data] %s = %.3f %s", name.c_str(), value, unit.c_str());
+// Уберите лямбду, используйте обычную функцию
+static void processModbusData(const String &name, float value, const String &unit) {
+    // Минимизируем создание объектов
+    char msg[128];
+    snprintf(msg, sizeof(msg), "[data] %s = %.3f %s", name.c_str(), value, unit.c_str());
+    logPrintln(String(msg));
+    
     mqttPublishValue(name, value, unit);
     historyPush(name, value);
     historyFlashPush(name, value);
-  });
-
-  historyFlashLoop();
-  tempHumidityLoop();
 }
+
+void loop() {
+    webServerLoop();
+    ElegantOTA.loop();
+    statusLedLoop();
+
+    modbusPollLoop(processModbusData);  // Передаем функцию, не лямбду
+
+    historyFlashLoop();
+    tempHumidityLoop();
+}
+

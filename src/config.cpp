@@ -45,6 +45,10 @@ void configSetDefaults() {
     {"AccumulatedTime", "Наработка", 15219, 2, false, 1.0f, "s", false},
     {"InverterOutputVoltageSet", "Уставка выходного напряжения", 20102, 1, false, 0.1f, "V", true, 220.0f, 240.0f, 1.0f},
     {"InverterOutputFrequencySet", "Уставка выходной частоты", 20103, 1, false, 0.01f, "Hz", true, 50.0f, 60.0f, 10.0f},
+    // Приоритет источника питания нагрузки (program 01 на LCD). Addr 20109:
+    // 1=SBU, 2=SUB, 3=UTI, 4=SOL. writable+enum_map → select в HA и в веб-UI.
+    {"EnergyUseMode", "Приоритет источника (SOL/UTI/SBU)", 20109, 1, false, 1.0f, "", true, 1.0f, 4.0f, 1.0f, false, false,
+      {{1, "SBU"}, {2, "SUB"}, {3, "UTI"}, {4, "SOL"}}},
     {"InverterMaxDischargerCurrent", "Макс. ток разряда батареи", 20113, 1, false, 0.1f, "A", true, 1.0f, 13.0f, 0.1f},
     {"BatteryStopDischargingVoltage", "Напряжение остановки разряда", 20118, 1, false, 0.1f, "V", true, 22.0f, 29.0f, 0.1f},
     {"BatteryStopChargingVoltage", "Напряжение остановки заряда", 20119, 1, false, 0.1f, "V", true, 22.0f, 29.0f, 0.1f},

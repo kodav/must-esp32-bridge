@@ -13,6 +13,11 @@ void historySetup();
 // колбэка modbusPollLoop(), что уже вызывает mqttPublishValue()).
 void historyPush(const String &name, float value);
 
+// Последнее известное значение регистра (кэш, обновляется на каждое
+// historyPush независимо от того, включена ли сама история в PSRAM).
+// Возвращает false, если значение ещё ни разу не приходило.
+bool historyGetLast(const String &name, float &outValue);
+
 // Пересоздать буфер под новые параметры конфига (число регистров,
 // poll_interval_ms, history_hours) -- вызывать после сохранения конфига.
 void historyReconfigure();

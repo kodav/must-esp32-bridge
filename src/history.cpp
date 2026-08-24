@@ -3,6 +3,7 @@
 #include "log_buffer.h"
 #include <esp_heap_caps.h>
 #include <time.h>
+#include <map>
 
 struct __attribute__((packed)) HistoryEntry {
   uint32_t timestamp; // unix-время (секунды), см. примечание в history.h
@@ -14,6 +15,9 @@ static HistoryEntry *s_buffer = nullptr;
 static size_t s_capacity = 0;
 static size_t s_writeIdx = 0;
 static uint32_t s_totalWrites = 0; // монотонный счётчик -- переполнение практически невозможно за время жизни устройства
+
+// Последние значения — живут независимо от кольцевого буфера/PSRAM.
+static std::map<String, float> s_lastValues;
 
 static void allocateBuffer() {
   if (s_buffer) {
@@ -59,6 +63,8 @@ void historyReconfigure() {
 }
 
 void historyPush(const String &name, float value) {
+  s_lastValues[name] = value;
+
   if (!s_buffer) return;
 
   int regIndex = -1;
@@ -76,6 +82,13 @@ void historyPush(const String &name, float value) {
   s_buffer[s_writeIdx] = {ts, (uint16_t)regIndex, value};
   s_writeIdx = (s_writeIdx + 1) % s_capacity;
   s_totalWrites++;
+}
+
+bool historyGetLast(const String &name, float &outValue) {
+  auto it = s_lastValues.find(name);
+  if (it == s_lastValues.end()) return false;
+  outValue = it->second;
+  return true;
 }
 
 String historyGetJson(const String &registerName, size_t maxPoints) {
