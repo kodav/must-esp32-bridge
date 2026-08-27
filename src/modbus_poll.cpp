@@ -59,7 +59,13 @@ static std::vector<ReadGroup> s_groups;
 static size_t s_boundRegisterCount = (size_t)-1; // чтобы гарантированно пересобрать группы при первом вызове
 
 static void preTransmission()  { modbusTransportSetTx(); }
-static void postTransmission() { modbusTransportSetRx(); }
+static void postTransmission() {
+  modbusTransportSetRx();
+  // Auto-direction RS485 (DE=-1) и обычные модули: после последнего байта TX
+  // трансиверу нужно переключиться в RX до ответа слейва. Без паузы write
+  // чаще ловит 0xE2 (timeout), чем длинные read.
+  delayMicroseconds(1000);
+}
 
 // Пересобирает группы чтения из текущего g_config.registers -- вызывать
 // при изменении списка регистров (обнаруживается по несовпадению размера).
@@ -152,16 +158,47 @@ static void readGroup(const ReadGroup &g) {
   }
 }
 
+// MUST PV18 часто не отвечает на FC06 сразу после групповых чтений.
+// Перед записью: тишина на шине, очистка RX, до 3 попыток; при неудаче
+// FC06 пробуем FC16 (write multiple, count=1) — так же пишут ESPHome/HA.
+static bool tryWriteOnce(uint16_t address, uint16_t rawValue, uint8_t &outCode) {
+  Stream *st = modbusTransportBegin();
+  if (st) {
+    while (st->available() > 0) (void)st->read();
+  }
+  vTaskDelay(pdMS_TO_TICKS(80));
+
+  outCode = node.writeSingleRegister(address, rawValue);
+  if (outCode == node.ku8MBSuccess) return true;
+
+  if (st) {
+    while (st->available() > 0) (void)st->read();
+  }
+  vTaskDelay(pdMS_TO_TICKS(50));
+  node.setTransmitBuffer(0, rawValue);
+  outCode = node.writeMultipleRegisters(address, 1);
+  return outCode == node.ku8MBSuccess;
+}
+
 static void drainWriteQueue() {
   if (!s_writeQueue) return;
   WriteRequest wr;
   while (xQueueReceive(s_writeQueue, &wr, 0) == pdTRUE) {
-    uint8_t res = node.writeSingleRegister(wr.address, wr.rawValue);
-    bool ok = (res == node.ku8MBSuccess);
+    uint8_t res = 0xFF;
+    bool ok = false;
+    for (int attempt = 1; attempt <= 3 && !ok; attempt++) {
+      ok = tryWriteOnce(wr.address, wr.rawValue, res);
+      if (!ok) {
+        logPrintf("[modbus] запись addr=%u value=%u -- попытка %d ОШИБКА 0x%02X",
+                  wr.address, wr.rawValue, attempt, res);
+        vTaskDelay(pdMS_TO_TICKS(150));
+      }
+    }
     if (ok) {
       logPrintf("[modbus] запись addr=%u value=%u -- OK", wr.address, wr.rawValue);
     } else {
-      logPrintf("[modbus] запись addr=%u value=%u -- ОШИБКА 0x%02X", wr.address, wr.rawValue, res);
+      logPrintf("[modbus] запись addr=%u value=%u -- ПРОВАЛ после 3 попыток (0x%02X)",
+                wr.address, wr.rawValue, res);
     }
     if (wr.resultQueue) {
       ModbusWriteResult result{ok, res};
@@ -195,10 +232,12 @@ static void modbusTaskFn(void *) {
 
     for (const auto &g : s_groups) {
       readGroup(g);
-      drainWriteQueue(); // не заставляем запись ждать до конца прохода
       vTaskDelay(pdMS_TO_TICKS(30)); // бережнее к RS485-шине между запросами
     }
 
+    // Записи — только между полными проходами опроса. MUST PV18 часто
+    // не отвечает на write, если его вклинить между группами чтения.
+    drainWriteQueue();
     idleWait(g_config.poll_interval_ms);
   }
 }
