@@ -16,6 +16,12 @@ void mqttPublishValue(const String &name, float value, const String &unit);
 
 bool mqttIsConnected();
 
+// Краткий код состояния для веб/логов:
+// "ok" | "no_host" | "no_wifi" | "connecting" | "fail"
+const char *mqttStateCode();
+// Число неудачных попыток подряд (0 если подключены).
+int mqttFailCount();
+
 // Вызвать после изменения конфига (список регистров), чтобы переотправить
 // Home Assistant discovery payloads под новый набор точек.
 void mqttResetDiscovery();

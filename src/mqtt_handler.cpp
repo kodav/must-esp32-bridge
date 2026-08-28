@@ -54,9 +54,37 @@ static bool s_discoverySent = false;
 static volatile bool s_connectedFlag = false; // читается из других задач (statusLed) -- не трогаем s_mqtt напрямую снаружи
 static unsigned long s_lastReconnectAttempt = 0;
 
+// Состояние для веб/логов (читается из других задач).
+// 0=ok, 1=no_host, 2=no_wifi, 3=connecting, 4=fail
+static volatile int s_stateCode = 1;
+static volatile int s_failCount = 0;
+static volatile int s_lastRc = 0;
+
 // Короткий таймаут сокета: достаточно для нормальной сети, не даёт
 // lwIP уходить в минутные ретраи при недоступном брокере.
 static const unsigned long MQTT_SOCKET_TIMEOUT_MS = 3000;
+// Keepalive MQTT (сек) — шлётся в CONNECT; брокер/клиент ждут ~1–1.5×.
+static const uint16_t MQTT_KEEPALIVE_SEC = 15;
+// Двусторонний probe: публикуем в topic и ждём свой echo.
+// При blackhole на роутере publish() «успешен» (буфер TCP), но echo
+// не приходит — только так надёжно ловим «зелёный MQTT при мёртвом брокере».
+static const unsigned long MQTT_PROBE_INTERVAL_MS = 15000;  // шлём ping каждые 15 с
+static const unsigned long MQTT_PROBE_DEAD_MS     = 35000;  // нет echo → обрыв
+
+static volatile unsigned long s_lastProbeRxMs = 0;   // когда получили echo / connect
+static unsigned long s_lastProbeTxMs = 0;            // когда отправили probe
+static bool s_probePending = false;
+
+static void setMqttState(int code, const char *logMsg = nullptr) {
+  if (s_stateCode != code && logMsg) {
+    logPrintf("[mqtt] состояние: %s", logMsg);
+  }
+  s_stateCode = code;
+}
+
+static String probeTopic() {
+  return g_config.mqtt_topic_prefix + "/__ping";
+}
 
 static String deviceObjectId() {
   return "must_pv18_" + String((uint32_t)ESP.getEfuseMac(), HEX);
@@ -210,29 +238,32 @@ static void sendDiscoveryIfNeeded() {
 
 // Реальная публикация с учётом enum_map/bit_map/is_switch -- вызывается
 // ТОЛЬКО из MQTT-задачи (владеет s_mqtt), см. drainPublishQueue().
-static void publishOne(const String &name, float value) {
-  if (!s_mqtt.connected()) return;
+// Возвращает false, если publish не удался (сокет уже закрыт).
+// ВАЖНО: успешный publish НЕ доказывает, что брокер жив (blackhole TCP).
+static bool publishOne(const String &name, float value) {
+  if (!s_mqtt.connected()) return false;
   String topic = g_config.mqtt_topic_prefix + "/" + name;
+  bool ok = false;
 
   const RegisterDef *r = findRegister(name);
   if (r && !r->enum_map.empty()) {
     String text = lookupEnumText(*r, value);
-    s_mqtt.publish(topic.c_str(), text.c_str());
-    return;
-  }
-  if (r && !r->bit_map.empty()) {
+    ok = s_mqtt.publish(topic.c_str(), text.c_str());
+  } else if (r && !r->bit_map.empty()) {
     String text = lookupBitmaskText(*r, value);
-    s_mqtt.publish(topic.c_str(), text.c_str());
-    return;
-  }
-  if (r && r->writable && r->is_switch) {
-    s_mqtt.publish(topic.c_str(), String((int)lroundf(value)).c_str());
-    return;
+    ok = s_mqtt.publish(topic.c_str(), text.c_str());
+  } else if (r && r->writable && r->is_switch) {
+    ok = s_mqtt.publish(topic.c_str(), String((int)lroundf(value)).c_str());
+  } else {
+    char buf[32];
+    dtostrf(value, 0, 3, buf);
+    ok = s_mqtt.publish(topic.c_str(), buf);
   }
 
-  char buf[32];
-  dtostrf(value, 0, 3, buf);
-  s_mqtt.publish(topic.c_str(), buf);
+  if (!ok) {
+    logPrintf("[mqtt] проблема: publish '%s' не удался -- связь с брокером потеряна?", name.c_str());
+  }
+  return ok;
 }
 
 void mqttPublishValue(const String &name, float value, const String &unit) {
@@ -247,12 +278,18 @@ void mqttPublishValue(const String &name, float value, const String &unit) {
   xQueueSend(s_publishQueue, &req, 0);
 }
 
-static void drainPublishQueue() {
-  if (!s_mqtt.connected()) return;
+// true = очередь обработана без ошибок publish; false = обрыв, нужна переподписка
+static bool drainPublishQueue() {
+  if (!s_mqtt.connected()) return true;
   PublishRequest req;
   while (xQueueReceive(s_publishQueue, &req, 0) == pdTRUE) {
-    publishOne(String(req.name), req.value);
+    if (!publishOne(String(req.name), req.value)) {
+      // Очищаем остаток очереди — значения всё равно устарели
+      while (xQueueReceive(s_publishQueue, &req, 0) == pdTRUE) {}
+      return false;
+    }
   }
+  return true;
 }
 
 // Обработчик входящих MQTT-сообщений -- выполняется внутри MQTT-задачи
@@ -260,6 +297,15 @@ static void drainPublishQueue() {
 // modbusWriteRegisterSync() здесь безопасен -- не трогает веб-сервер.
 static void onMqttMessage(char *topic, byte *payload, unsigned int length) {
   String topicStr(topic);
+
+  // Echo нашего probe — единственное надёжное подтверждение, что брокер
+  // реально принимает и отдаёт пакеты (а не «полуоткрытый» TCP).
+  if (topicStr == probeTopic()) {
+    s_lastProbeRxMs = millis();
+    s_probePending = false;
+    return;
+  }
+
   String prefix = g_config.mqtt_topic_prefix + "/";
   if (!topicStr.startsWith(prefix) || !topicStr.endsWith("/set")) return;
 
@@ -338,6 +384,8 @@ static bool tryConnect() {
 
   s_mqtt.setServer(g_config.mqtt_host.c_str(), g_config.mqtt_port);
   s_mqtt.setBufferSize(2048);
+  s_mqtt.setKeepAlive(MQTT_KEEPALIVE_SEC);
+  s_mqtt.setSocketTimeout(MQTT_SOCKET_TIMEOUT_MS / 1000); // в секундах у PubSubClient
 
   // Короткий socket timeout ДО connect -- ограничивает время блокировки
   // в TCP SYN / TLS handshake. setTimeout влияет на read/write и
@@ -362,6 +410,16 @@ static bool tryConnect() {
   if (ok) {
     logPrintf("[mqtt] connected (%lu ms)", took);
     s_discoverySent = false;
+    s_lastRc = 0;
+    s_lastProbeRxMs = millis(); // считаем connect успешной «жизнью»
+    s_lastProbeTxMs = 0;
+    s_probePending = false;
+
+    // Подписка на probe-топик (свой echo) + команды writable-регистров
+    String ping = probeTopic();
+    if (!s_mqtt.subscribe(ping.c_str())) {
+      logPrintf("[mqtt] не удалось подписаться на probe '%s'", ping.c_str());
+    }
 
     unsigned subscribed = 0;
     for (auto &r : g_config.registers) {
@@ -369,10 +427,12 @@ static bool tryConnect() {
       String cmdTopic = g_config.mqtt_topic_prefix + "/" + r.name + "/set";
       if (s_mqtt.subscribe(cmdTopic.c_str())) subscribed++;
     }
-    logPrintf("[mqtt] подписка на команды: %u регистров", subscribed);
+    logPrintf("[mqtt] подписка на команды: %u регистров + probe", subscribed);
   } else {
-    logPrintf("[mqtt] connect failed, rc=%d, took %lu ms", s_mqtt.state(), took);
-    // На всякий случай закрываем сокет после неудачного connect
+    s_lastRc = s_mqtt.state();
+    // rc: -4 timeout, -3 lost, -2 failed, -1 disconnected, 1-5 protocol
+    logPrintf("[mqtt] connect failed, rc=%d, took %lu ms (проблема связи с брокером)",
+              s_lastRc, took);
     hardStopClient();
   }
 
@@ -393,14 +453,24 @@ static void mqttTaskFn(void *) {
     logPrintln("[mqtt] используется обычное (не шифрованное) соединение");
   }
   s_mqtt.setCallback(onMqttMessage);
+  s_mqtt.setKeepAlive(MQTT_KEEPALIVE_SEC);
+  s_mqtt.setSocketTimeout(MQTT_SOCKET_TIMEOUT_MS / 1000);
 
   int connectFailCount = 0;
 
   for (;;) {
-    if (WiFi.status() != WL_CONNECTED || g_config.mqtt_host.length() == 0) {
+    if (g_config.mqtt_host.length() == 0) {
       s_connectedFlag = false;
-      // Если WiFi пропал -- тоже чистим MQTT-сокет, чтобы не держать
-      // полуоткрытое состояние.
+      s_failCount = 0;
+      setMqttState(1, "хост не задан -- MQTT выключен");
+      if (s_mqtt.connected()) hardStopClient();
+      vTaskDelay(pdMS_TO_TICKS(1000));
+      continue;
+    }
+
+    if (WiFi.status() != WL_CONNECTED) {
+      s_connectedFlag = false;
+      setMqttState(2, "нет WiFi -- MQTT ждёт сеть");
       if (s_mqtt.connected()) hardStopClient();
       vTaskDelay(pdMS_TO_TICKS(1000));
       continue;
@@ -415,16 +485,26 @@ static void mqttTaskFn(void *) {
       if (connectFailCount > 5)  retryInterval = 15000;
       if (connectFailCount > 15) retryInterval = 60000;
 
+      if (connectFailCount == 0) {
+        setMqttState(3, "подключение к брокеру...");
+      } else {
+        setMqttState(4, nullptr); // fail -- детали уже в логе connect
+      }
+
       if (now - s_lastReconnectAttempt >= retryInterval) {
         s_lastReconnectAttempt = now;
+        setMqttState(3, "подключение к брокеру...");
 
         if (tryConnect()) {
           connectFailCount = 0;
+          s_failCount = 0;
         } else {
           connectFailCount++;
-          if (connectFailCount == 6 || connectFailCount == 16) {
-            logPrintf("[mqtt] %d неудачных попыток подряд, увеличиваю интервал переподключения",
-                      connectFailCount);
+          s_failCount = connectFailCount;
+          setMqttState(4, nullptr);
+          if (connectFailCount == 1 || connectFailCount == 6 || connectFailCount == 16) {
+            logPrintf("[mqtt] проблема: брокер недоступен (попытка %d, следующий интервал %lu с)",
+                      connectFailCount, retryInterval / 1000UL);
           }
         }
       }
@@ -434,21 +514,77 @@ static void mqttTaskFn(void *) {
 
     s_connectedFlag = true;
     connectFailCount = 0;
+    s_failCount = 0;
+    setMqttState(0, "подключен");
 
     // Ограничение времени выполнения loop() -- не даём MQTT-задаче
     // надолго занимать ядро 0 даже при большом потоке сообщений.
     unsigned long loopStart = millis();
+    bool publishOk = true;
     while (s_mqtt.connected() && (millis() - loopStart) < 100) {
-      s_mqtt.loop();
+      if (!s_mqtt.loop()) {
+        break;
+      }
       sendDiscoveryIfNeeded();
-      drainPublishQueue();
+      if (!drainPublishQueue()) {
+        publishOk = false;
+        break;
+      }
       delay(1);
     }
 
-    // Если loop() обнаружил обрыв -- сразу чистим сокет
-    if (!s_mqtt.connected()) {
+    // Обрыв, обнаруженный loop()/publish
+    if (!s_mqtt.connected() || !publishOk) {
       hardStopClient();
       s_connectedFlag = false;
+      setMqttState(4, "связь с брокером оборвалась (WiFi есть, брокер недоступен)");
+      logPrintln("[mqtt] проблема: соединение сброшено, будет переподключение");
+      vTaskDelay(pdMS_TO_TICKS(200));
+      continue;
+    }
+
+    // Доп. проверка нижележащего TCP-сокета
+    bool tcpOk = g_config.mqtt_tls ? s_secureClient.connected() : s_plainClient.connected();
+    if (!tcpOk) {
+      logPrintln("[mqtt] проблема: TCP-сокет закрыт, брокер недоступен");
+      hardStopClient();
+      s_connectedFlag = false;
+      setMqttState(4, "TCP-сокет закрыт");
+      vTaskDelay(pdMS_TO_TICKS(200));
+      continue;
+    }
+
+    // --- Двусторонний probe (ловим blackhole на роутере) ---
+    unsigned long nowMs = millis();
+    if (nowMs - s_lastProbeTxMs >= MQTT_PROBE_INTERVAL_MS) {
+      s_lastProbeTxMs = nowMs;
+      String ping = probeTopic();
+      // payload = millis, чтобы брокер точно отдал «новое» сообщение
+      char payload[16];
+      snprintf(payload, sizeof(payload), "%lu", nowMs);
+      if (s_mqtt.publish(ping.c_str(), payload, false)) {
+        s_probePending = true;
+      } else {
+        logPrintln("[mqtt] проблема: probe publish не удался");
+        hardStopClient();
+        s_connectedFlag = false;
+        setMqttState(4, "probe publish failed");
+        vTaskDelay(pdMS_TO_TICKS(200));
+        continue;
+      }
+    }
+
+    // Нет echo дольше MQTT_PROBE_DEAD_MS → брокер недоступен
+    if (s_lastProbeRxMs != 0 && (nowMs - s_lastProbeRxMs) > MQTT_PROBE_DEAD_MS) {
+      logPrintf("[mqtt] проблема: нет ответа брокера %lu с (probe timeout) -- "
+                "WiFi есть, но MQTT-путь заблокирован или брокер мёртв",
+                (nowMs - s_lastProbeRxMs) / 1000UL);
+      hardStopClient();
+      s_connectedFlag = false;
+      s_probePending = false;
+      setMqttState(4, "брокер не отвечает (probe timeout)");
+      vTaskDelay(pdMS_TO_TICKS(200));
+      continue;
     }
 
     vTaskDelay(pdMS_TO_TICKS(50));
@@ -464,6 +600,18 @@ void mqttTaskStart() {
 }
 
 bool mqttIsConnected() { return s_connectedFlag; }
+
+const char *mqttStateCode() {
+  switch (s_stateCode) {
+    case 0: return "ok";
+    case 1: return "no_host";
+    case 2: return "no_wifi";
+    case 3: return "connecting";
+    default: return "fail";
+  }
+}
+
+int mqttFailCount() { return s_failCount; }
 
 void mqttTaskPause() {
   if (s_taskHandle) vTaskSuspend(s_taskHandle);

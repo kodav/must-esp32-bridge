@@ -55,6 +55,11 @@ static TaskHandle_t s_taskHandle = nullptr;
 static volatile bool s_lastReadOk = false;
 static volatile bool s_transportOk = false;
 
+// Для логов: не спамить одну и ту же ошибку каждый цикл опроса.
+static bool s_loggedTransportFail = false;
+static bool s_loggedReadFail = false;
+static unsigned s_readFailCount = 0;
+
 static std::vector<ReadGroup> s_groups;
 static size_t s_boundRegisterCount = (size_t)-1; // чтобы гарантированно пересобрать группы при первом вызове
 
@@ -112,8 +117,16 @@ static void rebuildGroups() {
 static bool ensureBound() {
   Stream *st = modbusTransportBegin();
   if (st == nullptr) {
+    if (s_transportOk || !s_loggedTransportFail) {
+      logPrintln("[modbus] проблема: UART/транспорт недоступен (ошибка UART)");
+      s_loggedTransportFail = true;
+    }
     s_transportOk = false;
     return false;
+  }
+  if (!s_transportOk) {
+    logPrintln("[modbus] транспорт восстановлен");
+    s_loggedTransportFail = false;
   }
   s_transportOk = true;
 
@@ -134,11 +147,21 @@ static void readGroup(const ReadGroup &g) {
   uint8_t result = node.readHoldingRegisters(g.startAddr, g.totalCount);
   if (result != node.ku8MBSuccess) {
     s_lastReadOk = false;
-    logPrintf("[modbus] read error 0x%02X for group addr=%u count=%u (%u регистров)",
-              result, g.startAddr, g.totalCount, (unsigned)g.members.size());
+    s_readFailCount++;
+    // Первая ошибка и далее каждые 10 — в лог, чтобы не забивать буфер
+    if (!s_loggedReadFail || (s_readFailCount % 10) == 1) {
+      logPrintf("[modbus] проблема: нет ответа инвертора (0x%02X) group addr=%u count=%u, сбоев подряд ~%u",
+                result, g.startAddr, g.totalCount, s_readFailCount);
+      s_loggedReadFail = true;
+    }
     return;
   }
 
+  if (s_loggedReadFail) {
+    logPrintf("[modbus] связь с инвертором восстановлена (было %u сбоев)", s_readFailCount);
+    s_loggedReadFail = false;
+    s_readFailCount = 0;
+  }
   s_lastReadOk = true;
   for (uint16_t idx : g.members) {
     const RegisterDef &r = g_config.registers[idx];
@@ -267,6 +290,12 @@ void modbusPollLoop(const RegisterValueCallback &onValue) {
 
 bool modbusIsHealthy() {
   return s_transportOk && s_lastReadOk;
+}
+
+const char *modbusStateCode() {
+  if (!s_transportOk) return "uart";
+  if (!s_lastReadOk) return "no_response";
+  return "ok";
 }
 
 void modbusTaskPause() {

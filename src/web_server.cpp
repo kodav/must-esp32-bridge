@@ -8,6 +8,7 @@
 #include "history_flash.h"
 #include "modbus_poll.h"
 #include "version.h"
+#include <WiFi.h>
 #include <ArduinoJson.h>
 #include <ElegantOTA.h>
 
@@ -92,7 +93,11 @@ static void handleGetStatus() {
   if (!checkAuth()) return;
   JsonDocument doc;
   doc["modbus_ok"] = modbusIsHealthy();
+  doc["modbus_state"] = modbusStateCode();
   doc["mqtt_ok"] = mqttIsConnected();
+  doc["mqtt_state"] = mqttStateCode();
+  doc["mqtt_fail_count"] = mqttFailCount();
+  doc["wifi_ok"] = (WiFi.status() == WL_CONNECTED);
   doc["auto_mode"]["enabled"] = g_config.auto_mode_enabled;
   doc["auto_mode"]["pv_high"] = g_config.auto_mode_pv_high;
   doc["auto_mode"]["pv_low"] = g_config.auto_mode_pv_low;

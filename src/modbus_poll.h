@@ -16,6 +16,10 @@ void modbusPollLoop(const RegisterValueCallback &onValue);
 
 bool modbusIsHealthy();
 
+// Краткий код состояния для веб/логов:
+// "ok" | "uart" | "no_response"
+const char *modbusStateCode();
+
 // Приостановить/возобновить задачу опроса. ОБЯЗАТЕЛЬНО вызывать вокруг
 // любой замены g_config целиком (см. web_server.cpp) -- задача в фоне
 // читает g_config.registers, и если конфиг переприсвоят прямо во время

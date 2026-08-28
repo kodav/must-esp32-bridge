@@ -391,6 +391,13 @@ const I18N = {
     btn_apply_mode: "Apply mode",
     label_link_modbus: "Modbus",
     label_link_mqtt: "MQTT",
+    st_ok: "OK",
+    st_modbus_uart: "UART error",
+    st_modbus_no_response: "no response",
+    st_mqtt_no_host: "not configured",
+    st_mqtt_no_wifi: "no WiFi",
+    st_mqtt_connecting: "connecting…",
+    st_mqtt_fail: "broker unreachable",
     status_mode_ok: "Mode applied",
     status_mode_err: "Write error: ",
     status_mode_pick: "Select a mode first",
@@ -484,6 +491,13 @@ const I18N = {
     btn_apply_mode: "\u041f\u0440\u0438\u043c\u0435\u043d\u0438\u0442\u044c \u0440\u0435\u0436\u0438\u043c",
     label_link_modbus: "Modbus",
     label_link_mqtt: "MQTT",
+    st_ok: "OK",
+    st_modbus_uart: "\u043e\u0448\u0438\u0431\u043a\u0430 UART",
+    st_modbus_no_response: "\u043d\u0435\u0442 \u043e\u0442\u0432\u0435\u0442\u0430",
+    st_mqtt_no_host: "\u043d\u0435 \u043d\u0430\u0441\u0442\u0440\u043e\u0435\u043d",
+    st_mqtt_no_wifi: "\u043d\u0435\u0442 WiFi",
+    st_mqtt_connecting: "\u043f\u043e\u0434\u043a\u043b\u044e\u0447\u0435\u043d\u0438\u0435\u2026",
+    st_mqtt_fail: "\u0431\u0440\u043e\u043a\u0435\u0440 \u043d\u0435\u0434\u043e\u0441\u0442\u0443\u043f\u0435\u043d",
     status_mode_ok: "\u0420\u0435\u0436\u0438\u043c \u043f\u0440\u0438\u043c\u0435\u043d\u0451\u043d",
     status_mode_err: "\u041e\u0448\u0438\u0431\u043a\u0430 \u0437\u0430\u043f\u0438\u0441\u0438: ",
     status_mode_pick: "\u0421\u043d\u0430\u0447\u0430\u043b\u0430 \u0432\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u0440\u0435\u0436\u0438\u043c",
@@ -743,16 +757,40 @@ async function loadVersion() {
 }
 loadVersion();
 
+function formatModbusState(s) {
+  const t = I18N[currentLang];
+  const code = s.modbus_state || (s.modbus_ok ? 'ok' : 'no_response');
+  if (code === 'ok') return { text: t.st_ok, ok: true };
+  if (code === 'uart') return { text: t.st_modbus_uart, ok: false };
+  return { text: t.st_modbus_no_response, ok: false };
+}
+
+function formatMqttState(s) {
+  const t = I18N[currentLang];
+  const code = s.mqtt_state || (s.mqtt_ok ? 'ok' : 'fail');
+  if (code === 'ok') return { text: t.st_ok, ok: true };
+  if (code === 'no_host') return { text: t.st_mqtt_no_host, ok: false };
+  if (code === 'no_wifi') return { text: t.st_mqtt_no_wifi, ok: false };
+  if (code === 'connecting') return { text: t.st_mqtt_connecting, ok: false };
+  let text = t.st_mqtt_fail;
+  if (s.mqtt_fail_count && s.mqtt_fail_count > 0) {
+    text += ' (' + s.mqtt_fail_count + ')';
+  }
+  return { text: text, ok: false };
+}
+
 async function pollStatus() {
   try {
     const r = await fetch('/api/status');
     const s = await r.json();
     const mb = document.getElementById('st_modbus');
     const mq = document.getElementById('st_mqtt');
-    mb.textContent = s.modbus_ok ? 'OK' : 'fail';
-    mb.style.color = s.modbus_ok ? 'var(--ok)' : 'var(--err)';
-    mq.textContent = s.mqtt_ok ? 'OK' : 'fail';
-    mq.style.color = s.mqtt_ok ? 'var(--ok)' : 'var(--err)';
+    const mbSt = formatModbusState(s);
+    const mqSt = formatMqttState(s);
+    mb.textContent = mbSt.text;
+    mb.style.color = mbSt.ok ? 'var(--ok)' : 'var(--err)';
+    mq.textContent = mqSt.text;
+    mq.style.color = mqSt.ok ? 'var(--ok)' : 'var(--err)';
     if (s.values && s.values.EnergyUseMode !== undefined) {
       const sel = document.getElementById('ctrl_energy_mode');
       const v = String(Math.round(s.values.EnergyUseMode));
