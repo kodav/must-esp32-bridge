@@ -758,7 +758,7 @@
     "address": 25274,
     "count": 1,
     "is_signed": true,
-    "scale": 0.1,
+    "scale": 1,
     "unit": "A",
     "writable": false,
     "is_local": false
@@ -853,7 +853,25 @@
     "scale": 1,
     "unit": "",
     "writable": false,
-    "is_local": false
+    "is_local": false,
+    "bit_map": {
+      "0": "Hardware protection",
+      "1": "Over current",
+      "2": "Current sensor error",
+      "3": "Over temperature",
+      "4": "PV voltage is too high",
+      "5": "PV voltage is too low",
+      "6": "Battery voltage is too high",
+      "7": "Battery voltage is too Low",
+      "8": "Current is uncontrollable",
+      "9": "Parameter error",
+      "10": "",
+      "11": "",
+      "12": "",
+      "13": "",
+      "14": "",
+      "15": ""
+    }
   },
   {
     "name": "ChargerWarningMessage",
@@ -864,7 +882,25 @@
     "scale": 1,
     "unit": "",
     "writable": false,
-    "is_local": false
+    "is_local": false,
+    "bit_map": {
+      "0": "Fan Error",
+      "1": "",
+      "2": "",
+      "3": "",
+      "4": "",
+      "5": "",
+      "6": "",
+      "7": "",
+      "8": "",
+      "9": "",
+      "10": "",
+      "11": "",
+      "12": "",
+      "13": "",
+      "14": "",
+      "15": ""
+    }
   },
   {
     "name": "InverterErrorMessage",
@@ -875,7 +911,41 @@
     "scale": 1,
     "unit": "",
     "writable": false,
-    "is_local": false
+    "is_local": false,
+    "bit_map": {
+      "0": "Fan is locked when inverter is off",
+      "1": "Inverter transformer over temperature",
+      "2": "Battery voltage is too high",
+      "3": "Battery voltage is too low",
+      "4": "Output short circuited",
+      "5": "Inverter output voltage is high",
+      "6": "Overload time out",
+      "7": "Inverter bus voltage is too high",
+      "8": "Bus soft start failed",
+      "9": "Main relay failed",
+      "10": "Inverter output voltage sensor error",
+      "11": "Inverter grid voltage sensor error",
+      "12": "Inverter output current sensor error",
+      "13": "Inverter grid current sensor error",
+      "14": "Inverter load current sensor error",
+      "15": "Inverter grid over current error",
+      "16": "Inverter radiator over temperature",
+      "17": "Solar charger battery voltage class error",
+      "18": "Solar charger current sensor error",
+      "19": "Solar charger current is uncontrollable",
+      "20": "Inverter grid voltage is low",
+      "21": "Inverter grid voltage is high",
+      "22": "Inverter grid under frequency",
+      "23": "Inverter grid over frequency",
+      "24": "Inverter over current protection error",
+      "25": "Inverter bus voltage is too low",
+      "26": "Inverter soft start failed",
+      "27": "Over DC voltage in AC output",
+      "28": "Battery connection is open",
+      "29": "Inverter control current sensor error",
+      "30": "Inverter output voltage is too low",
+      "31": ""
+    }
   },
   {
     "name": "InverterWarningMessage",
@@ -886,7 +956,25 @@
     "scale": 1,
     "unit": "",
     "writable": false,
-    "is_local": false
+    "is_local": false,
+    "bit_map": {
+      "0": "Fan is locked when inverter is on.",
+      "1": "Fan2 is locked when inverter is on.",
+      "2": "Battery is over-charged.",
+      "3": "Low battery",
+      "4": "Overload",
+      "5": "Output power derating",
+      "6": "Solar charger stops due to low battery.",
+      "7": "Solar charger stops due to high PV voltage.",
+      "8": "Solar charger stops due to over load.",
+      "9": "Solar charger over temperature",
+      "10": "PV charger communication error",
+      "11": "",
+      "12": "",
+      "13": "",
+      "14": "",
+      "15": ""
+    }
   },
   {
     "name": "AccumulatedPower",
@@ -894,7 +982,7 @@
     "address": 15217,
     "count": 2,
     "is_signed": false,
-    "scale": 1,
+    "scale": 0.1,
     "unit": "kWh",
     "writable": false,
     "is_local": false
@@ -916,7 +1004,7 @@
     "address": 25247,
     "count": 2,
     "is_signed": false,
-    "scale": 1,
+    "scale": 0.1,
     "unit": "kWh",
     "writable": false,
     "is_local": false
@@ -927,7 +1015,7 @@
     "address": 25249,
     "count": 2,
     "is_signed": false,
-    "scale": 1,
+    "scale": 0.1,
     "unit": "kWh",
     "writable": false,
     "is_local": false
@@ -949,7 +1037,7 @@
     "address": 25253,
     "count": 2,
     "is_signed": false,
-    "scale": 1,
+    "scale": 0.1,
     "unit": "kWh",
     "writable": false,
     "is_local": false
@@ -960,7 +1048,7 @@
     "address": 25255,
     "count": 2,
     "is_signed": false,
-    "scale": 1,
+    "scale": 0.1,
     "unit": "kWh",
     "writable": false,
     "is_local": false
@@ -982,7 +1070,7 @@
     "address": 25259,
     "count": 2,
     "is_signed": false,
-    "scale": 1,
+    "scale": 0.1,
     "unit": "kWh",
     "writable": false,
     "is_local": false
