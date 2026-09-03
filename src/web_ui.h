@@ -79,6 +79,11 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(
     <button type="button" onclick="setEnergyMode()" data-i18n="btn_apply_mode">Apply mode</button>
     <span id="ctrl_status" style="margin-left:12px;font-size:13px;color:var(--muted);"></span>
 
+    <div style="margin-top: 14px;">
+      <button type="button" class="secondary" onclick="resetCoulomb()" data-i18n="btn_reset_coulomb">Calibrate / Reset SoC to 100%</button>
+      <span id="coulomb_status" style="margin-left:12px;font-size:13px;color:var(--muted);"></span>
+    </div>    
+
     <hr style="border:none;border-top:1px solid var(--border);margin:16px 0;">
     <label><input id="auto_mode_enabled" type="checkbox" style="width:auto;display:inline-block;margin-right:6px;">
       <span data-i18n="label_auto_mode">Auto switch SBU ↔ UTI by PV voltage</span></label>
@@ -282,6 +287,9 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(
 <script>
 const I18N = {
   en: {
+    btn_reset_coulomb: "Calibrate / Reset SoC to 100%",
+    status_coulomb_ok: "SoC reset to 100%",
+    status_coulomb_err: "Error: ",
     link_ota: "Firmware (OTA) \u2192",
     card_wifi: "WiFi",
     label_ssid: "SSID",
@@ -409,6 +417,9 @@ const I18N = {
     hint_auto_mode_save: "These settings are saved with the rest of the config (Save and reboot)."
   },
   ru: {
+    btn_reset_coulomb: "Калибровать / Сбросить SoC на 100%",
+    status_coulomb_ok: "SoC сброшен на 100%",
+    status_coulomb_err: "Ошибка: " ,
     link_ota: "\u041f\u0440\u043e\u0448\u0438\u0432\u043a\u0430 (OTA) \u2192",
     card_wifi: "WiFi",
     label_ssid: "SSID",
@@ -840,8 +851,29 @@ async function setEnergyMode() {
   }
 }
 
+async function resetCoulomb() {
+  const st = document.getElementById('coulomb_status');
+  st.textContent = '...';
+  st.style.color = 'var(--muted)';
+  try {
+    const r = await fetch('/api/coulomb/reset', { method: 'POST' });
+    const t = await r.text();
+    if (r.ok) {
+      st.textContent = I18N[currentLang].status_coulomb_ok;
+      st.style.color = 'var(--ok)';
+    } else {
+      st.textContent = I18N[currentLang].status_coulomb_err + t;
+      st.style.color = 'var(--err)';
+    }
+  } catch (e) {
+    st.textContent = I18N[currentLang].status_coulomb_err + e;
+    st.style.color = 'var(--err)';
+  }
+}
+  
 applyLang(currentLang);
 loadConfig();
+
 </script>
 </body>
 </html>)HTML";

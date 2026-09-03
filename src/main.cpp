@@ -13,6 +13,7 @@
 #include "history_flash.h"
 #include "version.h"
 #include "temp_humidity.h"
+#include "coulomb_counter.h"   // добавить к остальным include
 
 static const char *AP_SSID = "MUST-PV18-Setup";
 static const char *AP_PASSWORD = "12345678"; // сменить, если критично для вашей сети
@@ -70,6 +71,7 @@ void setup() {
   logPrintf("[boot] версия прошивки: %s (собрано %s)", FIRMWARE_VERSION, FIRMWARE_BUILD_DATE);
 
   configLoad();
+  coulombCounterBegin();
   statusLedSetup();
   connectWifiOrStartAP();
 
@@ -178,6 +180,8 @@ static void autoModeOnPvSample(float pvV) {
 }
 
 static void processModbusData(const String &name, float value, const String &unit) {
+    coulombCounterFeed(name, value);   // <-- ваттметр/кулонометр питается от потока регистров
+    
     char msg[128];
     snprintf(msg, sizeof(msg), "[data] %s = %.3f %s", name.c_str(), value, unit.c_str());
     logPrintln(String(msg));
@@ -209,6 +213,7 @@ void loop() {
     statusLedLoop();
 
     modbusPollLoop(processModbusData);  // Передаем функцию, не лямбду
+    coulombCounterLoop();      // <-- публикация + сохранение в NVS
 
     historyFlashLoop();
     tempHumidityLoop();

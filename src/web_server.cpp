@@ -8,6 +8,7 @@
 #include "history_flash.h"
 #include "modbus_poll.h"
 #include "version.h"
+#include "coulomb_counter.h"
 #include <WiFi.h>
 #include <ArduinoJson.h>
 #include <ElegantOTA.h>
@@ -205,6 +206,12 @@ static void handleGetHistory() {
   g_webServer.send(200, "application/json", historyGetJson(reg, points));
 }
 
+static void handlePostCoulombReset() {
+  if (!checkAuth()) return;
+  coulombCounterResetFull();
+  g_webServer.send(200, "text/plain", "OK -- кулонометр сброшен на 100%");
+}
+
 void webServerSetup() {
   g_webServer.on("/", HTTP_GET, handleIndex);
   g_webServer.on("/api/config", HTTP_GET, handleGetConfig);
@@ -216,6 +223,7 @@ void webServerSetup() {
   g_webServer.on("/api/version", HTTP_GET, handleGetVersion);
   g_webServer.on("/api/status", HTTP_GET, handleGetStatus);
   g_webServer.on("/api/modbus/write", HTTP_POST, handlePostModbusWrite);
+  g_webServer.on("/api/coulomb/reset", HTTP_POST, handlePostCoulombReset);
 
   // logInit() уже вызван в main.cpp::setup() до logInstallEspLogCapture() --
   // повторный вызов здесь стёр бы уже накопленные ранние логи загрузки.
@@ -246,3 +254,4 @@ void webServerLoop() {
   // FreeRTOS-задачи на ядре 0: зависания RS485/MQTT не блокируют HTTP.
   g_webServer.handleClient();
 }
+

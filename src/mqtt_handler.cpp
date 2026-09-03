@@ -212,7 +212,14 @@ static void sendDiscoveryIfNeeded() {
       // битовая маска -- произвольная комбинация текста, не fixed-set,
       // поэтому просто текстовый сенсор без unit/device_class/options
     } else {
-      String devClass = (r.name == "AmbientHumidity") ? "humidity" : guessDeviceClass(r.unit);
+      String devClass;
+      if (r.name == "BatterySoC") {
+        devClass = "battery";
+      } else if (r.name == "AmbientHumidity") {
+        devClass = "humidity";
+      } else {
+        devClass = guessDeviceClass(r.unit);
+      }
       String stateClass = guessStateClass(r.unit);
       if (r.unit.length()) payload += "\"unit_of_measurement\":\"" + r.unit + "\",";
       if (devClass.length()) payload += "\"device_class\":\"" + devClass + "\",";
