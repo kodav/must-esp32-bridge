@@ -322,6 +322,37 @@ static void onMqttMessage(char *topic, byte *payload, unsigned int length) {
   payloadStr.reserve(length);
   for (unsigned int i = 0; i < length; i++) payloadStr += (char)payload[i];
 
+  // Перехват локальных настроек авто-режима (не Modbus-регистры)
+  if (name == "AutoModeEnabled") {
+    g_config.auto_mode_enabled = (payloadStr.toInt() != 0);
+    configSave();
+    String stateTopic = g_config.mqtt_topic_prefix + "/" + name;
+    s_mqtt.publish(stateTopic.c_str(), payloadStr.c_str(), true);
+    logPrintf("[mqtt] Авто-режим обновлен из HA: %d", g_config.auto_mode_enabled);
+    return;
+  } else if (name == "AutoModePvHigh") {
+    g_config.auto_mode_pv_high = payloadStr.toFloat();
+    configSave();
+    String stateTopic = g_config.mqtt_topic_prefix + "/" + name;
+    s_mqtt.publish(stateTopic.c_str(), payloadStr.c_str(), true);
+    logPrintf("[mqtt] PV High порог обновлен из HA: %.1f", g_config.auto_mode_pv_high);
+    return;
+  } else if (name == "AutoModePvLow") {
+    g_config.auto_mode_pv_low = payloadStr.toFloat();
+    configSave();
+    String stateTopic = g_config.mqtt_topic_prefix + "/" + name;
+    s_mqtt.publish(stateTopic.c_str(), payloadStr.c_str(), true);
+    logPrintf("[mqtt] PV Low порог обновлен из HA: %.1f", g_config.auto_mode_pv_low);
+    return;
+  } else if (name == "AutoModeMinInterval") {
+    g_config.auto_mode_min_interval_s = (uint32_t)payloadStr.toInt();
+    configSave();
+    String stateTopic = g_config.mqtt_topic_prefix + "/" + name;
+    s_mqtt.publish(stateTopic.c_str(), payloadStr.c_str(), true);
+    logPrintf("[mqtt] Интервал удержания обновлен из HA: %u с", (unsigned)g_config.auto_mode_min_interval_s);
+    return;
+  }  
+
   const RegisterDef *r = findRegister(name);
   if (!r || !r->writable) {
     logPrintf("[mqtt] команда на '%s' проигнорирована -- регистр не найден или не writable", name.c_str());
@@ -464,6 +495,7 @@ static void mqttTaskFn(void *) {
   s_mqtt.setSocketTimeout(MQTT_SOCKET_TIMEOUT_MS / 1000);
 
   int connectFailCount = 0;
+  unsigned long lastAutoPublishMs = 0;
 
   for (;;) {
     if (g_config.mqtt_host.length() == 0) {
@@ -524,6 +556,16 @@ static void mqttTaskFn(void *) {
     s_failCount = 0;
     setMqttState(0, "подключен");
 
+    // Периодическая публикация локальных параметров авто-режима (каждые 30 сек)
+    unsigned long nowMs = millis();
+    if (nowMs - lastAutoPublishMs >= 30000) {
+      lastAutoPublishMs = nowMs;
+      mqttPublishValue("AutoModeEnabled", g_config.auto_mode_enabled ? 1.0f : 0.0f, "");
+      mqttPublishValue("AutoModePvHigh", g_config.auto_mode_pv_high, "V");
+      mqttPublishValue("AutoModePvLow", g_config.auto_mode_pv_low, "V");
+      mqttPublishValue("AutoModeMinInterval", (float)g_config.auto_mode_min_interval_s, "s");
+    }    
+
     // Ограничение времени выполнения loop() -- не даём MQTT-задаче
     // надолго занимать ядро 0 даже при большом потоке сообщений.
     unsigned long loopStart = millis();
@@ -562,7 +604,7 @@ static void mqttTaskFn(void *) {
     }
 
     // --- Двусторонний probe (ловим blackhole на роутере) ---
-    unsigned long nowMs = millis();
+    nowMs = millis();
     if (nowMs - s_lastProbeTxMs >= MQTT_PROBE_INTERVAL_MS) {
       s_lastProbeTxMs = nowMs;
       String ping = probeTopic();
