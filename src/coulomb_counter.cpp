@@ -19,13 +19,13 @@ static const float    kCurrentDeadzone   = 0.05f;   // мертвая зона �
 static uint32_t s_publishPeriodMs = 15000; // По умолчанию, если конфиг не подгрузился
 
 // ----------------------------- Константы -----------------------------
-static const float    kFloatCalibrateCurrentA = 1.0f;   // |I| < 1 A — батарея полна
+static const float    kFloatCalibrateCurrentA = 3.0f;   // |I| < 1 A — батарея полна
 static const float    kFloatCalibrateVoltageMargin = 0.2f; // допуск по напряжению
 static const uint32_t kFullCalibrateHoldMs = 60000;     // условие должно держаться 60 с
 
 // ----------------------------- Состояние -----------------------------
-static float    s_floatVoltage   = 27.0f;   // из конфига (FloatVoltage)
-static float    s_absorbVoltage  = 28.4f;   // из конфига (AbsorptionVoltage)
+static float s_floatVoltage  = 27.2f;   // LiFePO4
+static float s_absorbVoltage = 28.4f;   // LiFePO4
 static uint32_t s_fullCondStartMs = 0;      // когда условие калибровки стало истинным
 static bool     s_fullCondActive  = false;  // условие калибровки активно
 
@@ -99,19 +99,15 @@ void coulombCounterBegin() {
 
 // Возвращает true, если батарея действительно полна по совокупности признаков
 static bool isBatteryFullCondition() {
-    // 1. Стадия заряда должна быть Float (2) или Absorb (3)
-    if (s_chargingState != 2 && s_chargingState != 3) return false;
-
-    // 2. Ток заряда должен быть мал (батарея почти не принимает ток)
-    //    s_filtCurrent < 0 — заряд; берём модуль
+    // 1. Ток заряда должен быть мал
     if (fabsf(s_filtCurrent) > kFloatCalibrateCurrentA) return false;
 
-    // 3. Напряжение должно быть близко к уставке поддержки/абсорбции
-    float vTarget = (s_chargingState == 2) ? s_floatVoltage : s_absorbVoltage;
+    // 2. Напряжение близко к Float для LiFePO4 (27.2–27.6 V)
     if (!s_haveVoltage) return false;
-    if (s_voltage < vTarget - kFloatCalibrateVoltageMargin) return false;
+    if (s_voltage < s_floatVoltage - kFloatCalibrateVoltageMargin) return false;
+    if (s_voltage > s_floatVoltage + 0.5f) return false;
 
-    // 4. Уже не 100% — иначе нечего калибровать
+    // 3. Уже не 100%
     if (s_remainingAh >= s_capacityAh - 0.01f) return false;
 
     return true;
