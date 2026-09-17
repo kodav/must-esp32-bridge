@@ -11,11 +11,23 @@
 static const int      kMovingAvgN        = 5;
 static const uint32_t kMaxSampleGapMs    = 30000;
 static const uint32_t kSavePeriodMs      = 60000;
-static const uint32_t kPublishPeriodMs   = 30000;  // редкая публикация по таймеру (раз в 30с)
 static const float    kChargeEfficiency  = 0.98f;
 static const float    kSaveDeltaAh       = 0.5f;   // сохранение в NVS при сдвиге на 0.5 Ah
 static const float    kPublishDeltaSoc   = 0.5f;   // публикация вне очереди при изменении SoC на 0.5%
-static const float    kCurrentDeadzone   = 0.2f;   // мертвая зона тока (±0.2А считаем за 0 для отсечения шума)
+static const float    kCurrentDeadzone   = 0.05f;   // мертвая зона тока (±0.05А считаем за 0 для отсечения шума)
+// Вместо статической константы kPublishPeriodMs используем переменную
+static uint32_t s_publishPeriodMs = 15000; // По умолчанию, если конфиг не подгрузился
+
+// ----------------------------- Константы -----------------------------
+static const float    kFloatCalibrateCurrentA = 1.0f;   // |I| < 1 A — батарея полна
+static const float    kFloatCalibrateVoltageMargin = 0.2f; // допуск по напряжению
+static const uint32_t kFullCalibrateHoldMs = 60000;     // условие должно держаться 60 с
+
+// ----------------------------- Состояние -----------------------------
+static float    s_floatVoltage   = 27.0f;   // из конфига (FloatVoltage)
+static float    s_absorbVoltage  = 28.4f;   // из конфига (AbsorptionVoltage)
+static uint32_t s_fullCondStartMs = 0;      // когда условие калибровки стало истинным
+static bool     s_fullCondActive  = false;  // условие калибровки активно
 
 // ----------------------------- Состояние -----------------------------
 static Preferences s_prefs;
@@ -49,14 +61,6 @@ static void publishVirtual(const char *name, float value, const char *unit) {
   historyFlashPush(String(name), value);
 }
 
-void coulombCounterResetFull() {
-  s_remainingAh = s_capacityAh;
-  s_lastSavedAh = s_remainingAh;
-  logPrintf("[coulomb] калибровка 100%%: емкость установлена в %.1f Ah", s_remainingAh);
-  publishVirtual("BatterySoC", 100.0f, "%");
-  publishVirtual("BatteryAhRemaining", s_remainingAh, "Ah");
-}
-
 static void saveToNvs() {
   if (!s_prefs.begin("coulomb", false)) return;
   s_prefs.putFloat("remAh", s_remainingAh);
@@ -66,7 +70,19 @@ static void saveToNvs() {
   s_lastSavedAh = s_remainingAh;
 }
 
+void coulombCounterResetFull() {
+  s_remainingAh = s_capacityAh;
+  s_lastSavedAh = s_remainingAh;
+  saveToNvs();
+  logPrintf("[coulomb] калибровка 100%%: емкость установлена в %.1f Ah", s_remainingAh);
+  publishVirtual("BatterySoC", 100.0f, "%");
+  publishVirtual("BatteryAhRemaining", s_remainingAh, "Ah");
+}
+
 void coulombCounterBegin() {
+  // Берем актуальный интервал опроса из глобального конфига (в миллисекундах)
+  s_publishPeriodMs = g_config.poll_interval_ms;
+
   if (s_prefs.begin("coulomb", true)) {
     s_remainingAh  = s_prefs.getFloat("remAh", -1.0f);
     s_ahCharged    = s_prefs.getFloat("chgAh", 0.0f);
@@ -79,6 +95,26 @@ void coulombCounterBegin() {
     logPrintf("[coulomb] NVS чист: инициализация 50%% (%.1f Ah). Ждём стадию Float.", s_remainingAh);
   }
   s_lastSavedAh = s_remainingAh;
+}
+
+// Возвращает true, если батарея действительно полна по совокупности признаков
+static bool isBatteryFullCondition() {
+    // 1. Стадия заряда должна быть Float (2) или Absorb (3)
+    if (s_chargingState != 2 && s_chargingState != 3) return false;
+
+    // 2. Ток заряда должен быть мал (батарея почти не принимает ток)
+    //    s_filtCurrent < 0 — заряд; берём модуль
+    if (fabsf(s_filtCurrent) > kFloatCalibrateCurrentA) return false;
+
+    // 3. Напряжение должно быть близко к уставке поддержки/абсорбции
+    float vTarget = (s_chargingState == 2) ? s_floatVoltage : s_absorbVoltage;
+    if (!s_haveVoltage) return false;
+    if (s_voltage < vTarget - kFloatCalibrateVoltageMargin) return false;
+
+    // 4. Уже не 100% — иначе нечего калибровать
+    if (s_remainingAh >= s_capacityAh - 0.01f) return false;
+
+    return true;
 }
 
 void coulombCounterFeed(const String &name, float value) {
@@ -97,27 +133,31 @@ void coulombCounterFeed(const String &name, float value) {
     return;
   }
 
+  if (name == "FloatVoltage") {
+      if (value >= 20.0f && value <= 32.0f) s_floatVoltage = value;
+      return;
+  }
+  if (name == "AbsorptionVoltage") {
+      if (value >= 20.0f && value <= 32.0f) s_absorbVoltage = value;
+      return;
+  }
+
   if (name == "InverterBatteryVoltage") {
     s_voltage = value;
     s_haveVoltage = true;
-    if (s_voltage <= s_lowCutoffV && s_filtCurrent < 0.0f && s_remainingAh > 0.5f) {
-      s_remainingAh = 0.0f;
-      logPrintf("[coulomb] отсечка по нижнему порогу U=%.1fV -> SoC 0%%", s_voltage);
+    if (s_voltage <= s_lowCutoffV - 0.2f && s_filtCurrent > 0.5f && s_remainingAh > 0.5f) {
+        s_remainingAh = 0.0f;
+        logPrintf("[coulomb] отсечка по нижнему порогу U=%.1fV I=%.2fA -> SoC 0%%",
+                  s_voltage, s_filtCurrent);
     }
     return;
   }
 
   if (name == "ChargingState") {
-    s_chargingState = (int)lroundf(value);
-    // Калибруем на 100% только если инвертор в Float/Absorb И идет реальный заряд (ток < 0)
-    if (s_chargingState >= 1 && s_chargingState <= 3 && s_filtCurrent < 0.0f) {
-      if (s_remainingAh < s_capacityAh) {
-        coulombCounterResetFull();
-      }
-    }
-    return;
+      s_chargingState = (int)lroundf(value);
+      return;
   }
-  
+
   // BattCurrent (25274): на вашем инверторе ПЛЮС = разряд, МИНУС = заряд
   if (name != "BattCurrent") return;
 
@@ -136,27 +176,45 @@ void coulombCounterFeed(const String &name, float value) {
     calcCurrent = 0.0f;
   }
 
-  // Интегрирование А·ч с учетом правильного знака (плюс = разряд)
+  // Интегрирование А·ч (calcCurrent: плюс = разряд, минус = заряд)
   if (s_haveSample) {
     uint32_t dtMs = now - s_lastSampleMs;
     if (dtMs > 0 && dtMs <= kMaxSampleGapMs) {
       float dtHours = (float)dtMs / 3600000.0f;
       
-      // Инвертируем знак для кулонометра: разряд (+) уменьшает остаток
-      float effectiveCurrent = -calcCurrent; 
-      float eff = (effectiveCurrent > 0.0f) ? kChargeEfficiency : 1.0f; 
+      float effectiveCurrent = calcCurrent;
+      float eff = 1.0f;
+
+      if (effectiveCurrent > 0.0f) {
+        // Разряд: учитываем потери и эффект Пёкерта при высоких токах
+        // Чем выше ток, тем больше энергии теряется в тепле -> быстрее падает SoC
+        if (effectiveCurrent > 40.0f) {
+          eff = 1.12f; // Тяжелая нагрузка (>0.4C)
+        } else if (effectiveCurrent > 15.0f) {
+          eff = 1.06f; // Средняя нагрузка
+        } else {
+          eff = 1.02f; // Малая нагрузка
+        }
+      } else {
+        // Заряд: используем коэффициент эффективности заряда
+        eff = kChargeEfficiency;
+      }
+
+      // Разряд (положительный ток) уменьшает остаток емкости
       float dAh = effectiveCurrent * eff * dtHours;
+      s_remainingAh -= dAh;
 
-      s_remainingAh += dAh;
-
-      if (effectiveCurrent > 0.0f) s_ahCharged += dAh;
-      else                         s_ahDischarged += (-dAh);
+      if (effectiveCurrent > 0.0f) {
+        s_ahDischarged += dAh;
+      } else {
+        s_ahCharged += (-dAh);
+      }
 
       if (s_remainingAh < 0.0f) s_remainingAh = 0.0f;
       if (s_remainingAh > s_capacityAh) s_remainingAh = s_capacityAh;
     }
   }
-
+  
   s_lastSampleMs = now;
   s_haveSample = true;
 }
@@ -164,11 +222,26 @@ void coulombCounterFeed(const String &name, float value) {
 void coulombCounterLoop() {
   uint32_t now = millis();
 
-  // Если батарея в Float, принудительно держим 100%
-  if (s_chargingState == 2 && s_remainingAh < s_capacityAh) {
-    s_remainingAh = s_capacityAh;
+// ---- Калибровка 100% с гистерезисом по времени ----
+  bool cond = isBatteryFullCondition();
+  if (cond) {
+      if (!s_fullCondActive) {
+          s_fullCondActive  = true;
+          s_fullCondStartMs = now;
+      } else if (now - s_fullCondStartMs >= kFullCalibrateHoldMs) {
+          // Условие держится 60 секунд — калибруем
+          coulombCounterResetFull();
+          s_fullCondActive  = false;
+          s_fullCondStartMs = 0;
+          logPrintf("[coulomb] калибровка 100%%: U=%.2fV I=%.2fA state=%d",
+                    s_voltage, s_filtCurrent, s_chargingState);
+      }
+  } else {
+      // Условие нарушилось — сбрасываем таймер
+      s_fullCondActive  = false;
+      s_fullCondStartMs = 0;
   }
-
+    
   bool deltaReached = fabsf(s_remainingAh - s_lastSavedAh) >= kSaveDeltaAh;
   if (deltaReached && (now - s_lastSaveMs >= kSavePeriodMs)) {
     saveToNvs();
@@ -178,7 +251,8 @@ void coulombCounterLoop() {
   float soc = coulombCounterSoC();
   bool socChanged = (s_lastPubSoc < 0.0f) || (fabsf(soc - s_lastPubSoc) >= kPublishDeltaSoc);
 
-  if (socChanged || (now - s_lastPublishMs >= kPublishPeriodMs)) {
+  // Используем s_publishPeriodMs вместо константы
+  if (socChanged || (now - s_lastPublishMs >= s_publishPeriodMs)) {
     s_lastPublishMs = now;
     s_lastPubSoc    = soc;
 
