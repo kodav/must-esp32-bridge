@@ -8,13 +8,13 @@
 #include <math.h>
 
 // ----------------------------- Константы -----------------------------
-static const int      kMovingAvgN        = 5;
+static const int      kMovingAvgN        = 20;
 static const uint32_t kMaxSampleGapMs    = 30000;
 static const uint32_t kSavePeriodMs      = 60000;
 static const float    kChargeEfficiency  = 0.98f;
 static const float    kSaveDeltaAh       = 0.5f;   // сохранение в NVS при сдвиге на 0.5 Ah
 static const float    kPublishDeltaSoc   = 0.5f;   // публикация вне очереди при изменении SoC на 0.5%
-static const float    kCurrentDeadzone   = 0.05f;   // мертвая зона тока (±0.05А считаем за 0 для отсечения шума)
+static const float    kCurrentDeadzone   = 0.5f;   // мертвая зона тока (±0.05А считаем за 0 для отсечения шума)
 // Вместо статической константы kPublishPeriodMs используем переменную
 static uint32_t s_publishPeriodMs = 15000; // По умолчанию, если конфиг не подгрузился
 
@@ -141,11 +141,11 @@ void coulombCounterFeed(const String &name, float value) {
   if (name == "InverterBatteryVoltage") {
     s_voltage = value;
     s_haveVoltage = true;
-    if (s_voltage <= s_lowCutoffV - 0.2f && s_filtCurrent > 0.5f && s_remainingAh > 0.5f) {
-        s_remainingAh = 0.0f;
-        logPrintf("[coulomb] отсечка по нижнему порогу U=%.1fV I=%.2fA -> SoC 0%%",
-                  s_voltage, s_filtCurrent);
-    }
+    // if (s_voltage <= s_lowCutoffV - 0.2f && s_filtCurrent > 0.5f && s_remainingAh > 0.5f) {
+    //     s_remainingAh = 0.0f;
+    //     logPrintf("[coulomb] отсечка по нижнему порогу U=%.1fV I=%.2fA -> SoC 0%%",
+    //               s_voltage, s_filtCurrent);
+    // }
     return;
   }
 
@@ -185,11 +185,11 @@ void coulombCounterFeed(const String &name, float value) {
         // Разряд: учитываем потери и эффект Пёкерта при высоких токах
         // Чем выше ток, тем больше энергии теряется в тепле -> быстрее падает SoC
         if (effectiveCurrent > 40.0f) {
-          eff = 1.12f; // Тяжелая нагрузка (>0.4C)
+          eff = 1.00f; // Тяжелая нагрузка (>0.4C)
         } else if (effectiveCurrent > 15.0f) {
-          eff = 1.06f; // Средняя нагрузка
+          eff = 1.00f; // Средняя нагрузка
         } else {
-          eff = 1.02f; // Малая нагрузка
+          eff = 1.00f; // Малая нагрузка
         }
       } else {
         // Заряд: используем коэффициент эффективности заряда
